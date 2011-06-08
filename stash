@@ -1,0 +1,83 @@
+#!/usr/bin/env ruby
+
+# git stash help
+
+class Stash
+  def usage
+    puts "stash           : list of stashes"
+    puts "stash 'comment' : save stash with comment"
+    puts "stash #         : pop stash (diff)"
+    puts "stash pop [#]   : pops off stash@{#} or head"
+    puts "stash merge [#]   : merges stash@{#} or head into current"
+  end
+
+  def emphasize(phrase)
+    "\e[1;34m#{phrase}\e[0m"
+  end
+
+  def run(args)
+    if args.size == 0
+      list
+      puts "---"
+      show("0")
+      return
+    end
+    cmd=args[0]
+    case cmd
+    when /^\d+$/
+      #may want to do pop here
+      show(cmd)
+    when 'list', 'show', 'diff', 'pop', 'drop', 'merge', 'apply', 'save', 'push'
+      send(cmd,args[1])
+    else
+      save(cmd)
+    end
+  end
+
+  def list(ignore='x')
+    list = `git stash list`
+    list.gsub!(/stash@[{]([0-9]+)[}]/) { emphasize($1) }
+    puts list
+  end
+
+  def common(cmd,stash)
+    stash||="0"
+    puts `git stash #{cmd} stash@{#{stash}}`
+  end
+
+  def show(stash)
+    #TODO: loosing all colors
+    common :show, stash
+  end
+
+  def diff(stash)
+    #    puts `git stash show --color=always stash@{#{stash}}`
+    common 'show --color=always', stash
+  end
+
+  def pop(stash)
+    common :pop, stash
+  end
+
+  def apply(stash)
+    common :apply, stash
+  end
+
+  def drop(stash)
+    common :drop, stash
+  end
+
+  def merge(stash)
+    stash||="0"
+    puts `git stash show -p stash@{#{stash}} | git apply && git stash drop stash@{#{stash}}`
+  end
+
+  def save(comment)
+    raise "Need a comment" if comment.nil?
+    comment.gsub!('"',"\\\"")
+    puts `git stash save "#{comment}"`
+  end
+  alias_method :push, :save
+end
+
+Stash.new.run(ARGV)

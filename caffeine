@@ -1,0 +1,37 @@
+#!/bin/sh
+
+# don't go to sleep
+# assumes caffeine is running in the menubar (isn't it for everyone?)
+
+#thanks http://benzi-ahamed.tumblr.com/post/5581355358/applescript-toggle-caffeines-state-notify-using
+# would be nice to check if it is already running - and return the previous state
+
+function silent_osa() {
+  osascript -l AppleScript -e "${*:?need osa command}" #> /dev/null
+}
+
+function caffeine_was() {
+  oldvalue=`osascript -l AppleScript -e "tell application \"Caffeine\" to return active"`
+  case $oldvalue in
+    on|true) echo "on" ;;
+    off|false) echo "off" ;;
+  esac
+}
+
+function turn_caffeine() {
+  case $1 in
+    on|true) state="on" ;;
+    off|false) state="off" ;;
+    *)
+      echo "unknown state $1"
+      exit 1
+      ;;
+  esac
+  state=${1:-Please state on or off}
+  silent_osa "tell application \"Caffeine\" to turn ${state}"
+}
+
+#tell everyone else what the old value was
+echo `caffeine_was`
+
+turn_caffeine $1

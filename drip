@@ -1,0 +1,12 @@
+#!/bin/sh
+
+# don't go to sleep
+# run this command
+# let me know when you are done
+
+was=`caffeine on`
+time "$@"
+ding "ran $1"
+if [ $was = "off" ] ; then
+  caffeine off > /dev/null
+fi

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+# processes running in a postgres server
+
+if [ $# -eq 1 ] ; then
+  limit="grep $1"
+else
+  #no limit
+  limit='cat -'
+fi
+echo "select datname, waiting, query_start, current_query from pg_stat_activity where current_query <> '<IDLE>';" | psql -U postgres | $limit
+
