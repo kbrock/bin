@@ -96,10 +96,8 @@ if $0 == __FILE__
 
   us=UpdateSanitized.new
   
-  if ! us.remote_alive?
-    puts "cant access remote system - ensure vpn is running"
-    exit 1
-  end
+  raise "cant access remote system - ensure vpn is running" unless us.remote_alive?
+
   us.fetch_file(force) if download
   us.load_sanitized if upload
 
