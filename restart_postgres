@@ -1,0 +1,5 @@
+#!/usr/bin/bash
+
+# you can find the launchctl names via ls ~/Library/LaunchDaemons/
+
+launchctl stop org.postgresql.postgres
