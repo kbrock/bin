@@ -2,7 +2,7 @@
 
 
 class UpdateSanitized
-  #dev2.plm = 192.168.10.3
+  DEV2='192.168.10.3'
   attr_accessor :target_dir
   attr_accessor :user
   def initialize()
@@ -38,7 +38,7 @@ class UpdateSanitized
   end
 
   def remote
-    "#{user}@192.168.10.3:/usr/local/pgsql/developer_db.pgdump"
+    "#{user}@#{DEV2}:/usr/local/pgsql/developer_db.pgdump"
   end
 
   def dated_file_name
@@ -51,6 +51,10 @@ class UpdateSanitized
 
   def backup
     true
+  end
+
+  def remote_alive?
+    `ping -c 1 -t 2 #{DEV2} > /dev/null; echo $?`.chomp == '0'
   end
 
   # fetch new file
@@ -91,6 +95,11 @@ if $0 == __FILE__
   upload=ARGV.include?('-l')
 
   us=UpdateSanitized.new
+  
+  if ! us.remote_alive?
+    puts "cant access remote system - ensure vpn is running"
+    exit 1
+  end
   us.fetch_file(force) if download
   us.load_sanitized if upload
 
