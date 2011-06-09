@@ -1,0 +1,8 @@
+host=${1:?please specify user@host}
+if [ ! -f ~/.ssh/id_rsa.pub ] ; then
+  echo "no key file [~/.ssh/id_rsa.pub]"
+  exit 1
+fi
+echo "sending key to ${host}"
+cat ~/.ssh/id_rsa.pub | ssh ${host} 'cat >> .ssh/authorized_keys2 && echo "copied"'
+
