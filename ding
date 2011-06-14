@@ -1,3 +1,12 @@
-function ding { growlnotify -s -m "${1:-ding}" ; }
 
-ding "$*"
+# message body, then the subject [sorry about that]
+# the -s means sticky
+function ding { growlnotify -s -m "$@" ; }
+
+if [ $# -eq 0 ] ; then
+  ding "ding"
+else
+  ding "$@"
+fi
+
+echo "$@"

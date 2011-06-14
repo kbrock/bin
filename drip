@@ -4,9 +4,23 @@
 # run this command
 # let me know when you are done
 
+
+#turn caffeine on and figure out what caffeine was
 was=`caffeine on`
-time "$@"
-ding "ran $1"
+
+# run the command (send the output / timing to a file - so we can growl it)
+tmpfile="/tmp/drip_$$"
+(time "$@" ) 2>&1 | tee $tmpfile
+ret=$?
+
+took=$(awk '/^real/ {print $2}' $tmpfile)
+rm $tmpfile > /dev/null
+
+ding "took $took" "$*"
+
+# turn caffeine back off (if it was on before we began)
 if [ $was = "off" ] ; then
   caffeine off > /dev/null
 fi
+
+exit $ret
