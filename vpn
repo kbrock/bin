@@ -1,0 +1,37 @@
+#!/bin/sh
+
+# connect to the vpn
+# assumes the vpn is configured as the name PLM - set variable VPN_NAME if this is not the case
+
+vpn=${VPN_NAME:-PLM}
+
+function silent_osa() {
+  osascript -l AppleScript -e "${*:?need osa command}" #> /dev/null
+}
+
+function vpn_was() {
+  oldvalue=`osascript -l AppleScript -e "tell application \"System Events\" to tell current location of network preferences to return connected of current configuration of service \"${vpn}\""`
+
+  case $oldvalue in
+    on|true) echo "on" ;;
+    off|false) echo "off" ;;
+  esac
+}
+
+function turn_vpn() {
+  case $1 in
+    on|true) action="connect" ;;
+    off|false) action="disconnect" ;;
+    *)
+      echo "unknown state $1"
+      exit 1
+      ;;
+  esac
+  state=${1:-Please state on or off}
+  silent_osa "tell application \"System Events\" to tell current location of network preferences to ${action} service \"${vpn}\""
+}
+
+#tell everyone else what the old value was
+echo `vpn_was`
+
+turn_vpn $1
