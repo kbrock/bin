@@ -6,7 +6,7 @@
 vpn=${VPN_NAME:-PLM}
 
 function silent_osa() {
-  osascript -l AppleScript -e "${*:?need osa command}" #> /dev/null
+  osascript -l AppleScript -e "${*:?need osa command}" > /dev/null
 }
 
 function vpn_was() {
