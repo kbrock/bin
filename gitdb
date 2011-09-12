@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+
+# add database name into your git config file
+# so it takes that database name instead of defaulting to the branch 
+databasename=${1-master}
+branchname=$(git branch | awk '/^\*/{print $2}')
+
+git config branch.${branchname}.database plm_development_${databasename}
+git config branch.${branchname}.test plm_test_${databasename}
+
+
+### this assumes your database.yml configuration looks something like the following
+# <% require 'grit' ; r = Grit::Repo.new(Rails.root); branch_name = (r.head && r.head.name)||'master' %>
+# development:
+#   adapter: postgresql
+#   database: <%= r.config["branch.#{branch_name}.database"] || "plm_development_#{branch_name}" %>
+#   host: localhost
+#   username: postgres
+#   password:
+#   pool: 8
+#   encoding: utf8
+# test: &test
+#   adapter: postgresql
+#   database: <%= r.config["branch.#{branch_name}.test"] || "plm_test_#{branch_name}" %>
+#   host: localhost
+#   username: postgres
+#   password: 
+#   min_messages: warning
+# cucumber:
+#   <<: *test
+
