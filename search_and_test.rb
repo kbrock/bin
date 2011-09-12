@@ -7,6 +7,9 @@
 #
 # the -I"lib:test" can be important if you get complaints like "no such file to load -- test_helper (MissingSourceFile)"
 
+#specify search terms like '(a|b|c)'
+ARGV[0]="'#{ARGV[0]}'"
+
 ack_opts = [
   "-i",              # case insensitive
   "-l",              # just return file names
@@ -15,7 +18,7 @@ ack_opts = [
   "test"            # scope our search to the test directory
 ].join(" ")
 
-test_files = `ack #{ack_opts}`.split("\n")
+test_files = `ack #{ack_opts}`.chomp.split("\n")
 
 if test_files.size > 0
   #taken from testrb
