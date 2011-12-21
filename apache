@@ -1,0 +1,12 @@
+if [ $# -gt 0 ] ; then
+  mode=$1
+else
+  mode=$(basename $0)
+fi
+
+if [ $mode = "apache" ] ; then
+  mode=restart
+fi
+echo "apachectl $mode"
+sudo apachectl $mode
+
