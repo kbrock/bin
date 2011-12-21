@@ -1,0 +1,4 @@
+#usage: dusk - show top 10
+#or dusk -20 - show top 20
+du -skx * |sort -nr | head ${1--10}
+#show the hierarchy (s,c,none)
