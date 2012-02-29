@@ -16,21 +16,11 @@ class UpdateSanitized
     puts
     ret=[]
     dtstart=Time.now
-    IO.popen(cmd) do |output| 
-        while line = output.gets do
-          puts line
-          #ret << line
-        end
-    end
+    system(cmd)
     dtend=Time.now
-    puts "took: #{dtend-dtstart}"
-    #ret #join("\n")
+    duration=dtend-dtstart
+    puts "took: #{duration}" if duration > 5
   end
-
-  # def run(cmd)
-  #   puts "#{cmd}"
-  #   puts `time #{cmd}`
-  # end
 
   #the date the file was created (not 'now')
   def datestr
@@ -96,7 +86,7 @@ if $0 == __FILE__
 
   us=UpdateSanitized.new
   
-  raise "cant access remote system - ensure vpn is running" unless us.remote_alive?
+  raise "cant access remote system - ensure vpn is running" if (download && ! us.remote_alive?)
 
   us.fetch_file(force) if download
   us.load_sanitized if upload

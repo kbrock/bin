@@ -3,6 +3,10 @@
 # add database name into your git config file
 # so it takes that database name instead of defaulting to the branch 
 databasename=${1-master}
+#prune off plm_development_ if that was entered
+databasename=${databasename#plm_development_}
+databasename=${databasename#plm_test_}
+
 branchname=$(git branch | awk '/^\*/{print $2}')
 
 git config branch.${branchname}.database plm_development_${databasename}
