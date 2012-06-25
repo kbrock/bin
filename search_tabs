@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+#open a new tab with the current working directory
+# && echo '\\ec'
+
+#My environment has 2 main bin directories
+mydir=$(dirname $0)
+export PATH=$PATH:${mydir}:${mydir}/plm
+
+cd ~/projects/plm-website
+new_tab -n 'plm' -p
+new_tab -t 'test' -p -e '#autospork.rb'
+new_tab -t 'sc' -p -e './script/console'
+new_tab -t 'psql' -p -e './script/dbconsole'
+
+new_tab -n tail@dev -p -e 'tail -f log/development.log'
+#new_tab -t redis -p -e 'redis-server config/redis/development_redis.conf' #-e 'tail -f log/redis.log' 
+new_tab -t sphinx -p -e 'rake ultrasphinx:daemon:start'
+new_tab -t resque -p -e "#rake resque:work QUEUE='*' --trace"
+new_tab -t scheduler -p -e '#rake resque:scheduler'
+new_tab -t email -p -e 'bundle exec mailcatcher'
+#new_tab -t spork -c -e 'bundle exec spork testunit'
+#new_tab -t memcache -p -e 'memcached'
+
+#used to have a -c, but terminal does it by default
