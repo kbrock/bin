@@ -41,7 +41,7 @@ end.reverse.each do |b|
   commit_date = last_commit.date.strftime('%Y-%m-%d')
   if pretty
     puts "#{commit_date} #{commit_diff.empty? ? ' ' : '*'} #{branch_name}"
-  else
+  elsif commit_diff || ! branch_name =~ /^\d{3}/
     puts "#{branch_name}, #{last_commit.committer.name}, #{commit_date}, #{commit_diff.empty?}, #{commit_diff.size}"
   end
 end
