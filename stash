@@ -6,6 +6,7 @@ class Stash
   def usage
     puts "stash [list]           : list of stashes"
     puts "stash [push] 'comment' : save stash with comment"
+    puts "stash local 'comment'  : saves local tree only (not staged)"
     #save does the same thing
     puts "stash [show] [#]       : show stash (list of files)"
     puts "stash diff [#]         : show stash (diff)"
@@ -33,7 +34,7 @@ class Stash
       show(cmd)
     when 'help'
       usage
-    when 'list', 'show', 'diff', 'pop', 'drop', 'merge', 'apply', 'save', 'push'
+    when 'list', 'show', 'diff', 'pop', 'drop', 'merge', 'apply', 'save', 'push', 'local'
       send(cmd,args[1])
     else
       save(cmd)
@@ -83,6 +84,13 @@ class Stash
     puts `git stash save "#{comment}"`
   end
   alias_method :push, :save
+
+  def local(comment)
+    raise "Need a comment" if comment.nil?
+    comment = comment.gsub('"',"\\\"")
+    puts `git stash save --keep-index "#{comment}"`
+  end
+
 end
 
 Stash.new.run(ARGV)
