@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+mov_dir="${1:?Please provide the folder with a movie}"
+#remove the trailing slash
+mov_dir="${mov_dir%%/}"
+if [ ! -d "${mov_dir}/VIDEO_TS" ] ; then
+  echo "expecting VIDEO_TS in ${mov_dir}"
+  exit 1
+fi
+hdiutil makehybrid -o "${mov_dir}.iso" "${mov_dir}"
+
+
+#copy to share if possible 
