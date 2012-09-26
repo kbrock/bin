@@ -1,0 +1,5 @@
+if [ $# -ne 2 ] ; then
+  echo "$(basename $0) old new"
+  exit 1
+fi
+echo -e "alter database $1 rename to $2;\n" | psql postgres
