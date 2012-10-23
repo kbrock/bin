@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+#command must be of the name dot2(format)
+
+format=$(basename $0)
+format=${format#*2}
+
+for i in "$*" ; do
+  target=${i%.*}.${format}
+  dot -T$format $i -o ${target}
+done
