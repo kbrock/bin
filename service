@@ -1,0 +1,43 @@
+#!/usr/bin/ruby
+
+#!/usr/bin/env ruby
+
+def get_agent_names(partial)
+  Dir["#{ENV['HOME']}/Library/LaunchAgents/*#{partial}*.plist"]
+end
+
+def alter_service(action, service_plist)
+  status=system("launchctl #{action} #{service_plist}")
+  puts "issue" unless status
+end
+
+action            = ARGV[0]
+agent_names       = get_agent_names(ARGV[1])
+short_agent_names = agent_names.map {|an| an.split("/").last}
+
+case action
+when "list"
+  puts "contents of ~/Library/LaunchAgents: "
+  puts short_agent_names.join("\n")
+  exit
+when "start", "load"
+  action="load"
+when "stop", "unload"
+  action="unload"
+#when "help", "-h", nil
+  else
+  puts "usage: service [help|list|start|stop] service_name"
+  exit 1
+end
+
+if short_agent_names.length == 1
+  alter_service(action, agent_names.first)
+elsif short_agent_names.length == 0
+  puts "service not found"
+  puts short_agent_names.join("\n")
+  exit 1
+else
+  puts "ambigious service name"
+  puts short_agent_names.join("\n")
+  exit 1
+end

@@ -1,0 +1,3 @@
+# remove a cassandra keyspace
+echo "drop keyspace ${1:-please provide a keyspace};" | cassandra-cli
+echo ""
