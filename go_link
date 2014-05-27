@@ -1,0 +1,38 @@
+# bash
+
+if [ $# -eq 1 ] ; then
+  url=$1
+else if [ -d .git ] ; then
+  # TODO: fallback to another remote?
+  url=$(git remote -v | awk '/origin/ { print $2}' | head -1)
+else
+  echo "usage: $(basename $0) git@github.com:user/package.git" >&2
+  exit 1
+fi
+
+# TODO: support http urls?
+# pkg = user/package
+pkg=${url#*:}
+pkg=${pkg%.git}
+
+# pkg_name = package
+pkg_name=${pkg%%/}
+# path_name = user
+path_name=${pkg#*/}
+
+if [ ! -d .git ] ; then
+  echo git clone ${url}
+  echo cd ${pkg_name}
+fi
+
+echo mkdir -p "src/${path_name}"
+echo pushd src/${path_name}
+echo ln -s $(echo "src/${pkg_name}" | sed -e 's/[-a-zA-Z]*/../g') ${pkg_name}
+
+#export GOPATH=$(pwd)
+
+# while developing:
+# mkdir -p src/github.com/kbrock
+# ln -s ../../.. src/github.com/kbrock/chat
+
+
