@@ -1,43 +1,68 @@
 #!/usr/bin/ruby
 
-#!/usr/bin/env ruby
-
 def get_agent_names(partial)
   Dir["#{ENV['HOME']}/Library/LaunchAgents/*#{partial}*.plist"]
 end
 
 def alter_service(action, service_plist)
-  status=system("launchctl #{action} #{service_plist}")
+  status=system("launchctl #{action} -w #{service_plist}")
   puts "issue" unless status
 end
 
-action            = ARGV[0]
-agent_names       = get_agent_names(ARGV[1])
+#TODO add apache suport:
+# if [ $# -gt 0 ] ; then
+#   mode=$1
+# else
+#   mode=$(basename $0)
+# fi
+
+# if [ $mode = "apache" ] ; then
+#   mode=restart
+# fi
+# echo "apachectl $mode"
+# sudo apachectl $mode
+
+action            = ARGV[1]
+if (ARGV[0] == "list")
+  action          = "list" 
+  agent_names     = get_agent_names("*")
+else
+  agent_names     = get_agent_names(ARGV[0])
+end
+
 short_agent_names = agent_names.map {|an| an.split("/").last}
 
-case action
-when "list"
-  puts "contents of ~/Library/LaunchAgents: "
+if short_agent_names.length == 0
+  puts "service #{ARGV[0]} not found"
   puts short_agent_names.join("\n")
-  exit
-when "start", "load"
-  action="load"
-when "stop", "unload"
-  action="unload"
-#when "help", "-h", nil
-  else
-  puts "usage: service [help|list|start|stop] service_name"
+  exit 1
+elsif short_agent_names.length > 1
+  puts "ambigious service name #{ARGV[0]}"
+  puts short_agent_names.join("\n")
   exit 1
 end
 
-if short_agent_names.length == 1
-  alter_service(action, agent_names.first)
-elsif short_agent_names.length == 0
-  puts "service not found"
-  puts short_agent_names.join("\n")
-  exit 1
+case action
+when "list"
+  puts ""
+  puts "contents of ~/Library/LaunchAgents: "
+  puts "    #{short_agent_names.join("\n    ")}"
+when "start", "load"
+  alter_service("load", agent_names.first)
+when "stop", "unload"
+  alter_service("unload", agent_names.first)
+when "fix"
+  case short_agent_names.first
+  when /postgres/
+    `rm /usr/local/var/postgres/postmaster.pid`
+  else
+    puts "only know how to fix postgres #{short_agent_names}"
+    exit 1
+  end
+when "vi", "edit", "subl"
+  `subl #{agent_names.first}`
+#when "help", "-h", nil
 else
-  puts "ambigious service name"
-  puts short_agent_names.join("\n")
+  puts "usage: service service_name [help|list|start|stop|vi|fix] "
   exit 1
 end
