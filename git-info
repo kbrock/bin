@@ -1,0 +1,11 @@
+
+LOCAL_BRANCH=`git name-rev --name-only HEAD`            # git current-branch
+TRACKING_REMOTE=`git config branch.$LOCAL_BRANCH.remote`
+
+REMOTE_URL=`git config remote.$(git current-remote).url`
+
+echo "LOCAL_BRANCH=$LOCAL_BRANCH # git name-rev --name-only HEAD"        # master
+echo "TRACKING_BRANCH=`git config branch.$LOCAL_BRANCH.merge` # branch.$LOCAL_BRANCH.merge"  # refs/heads/master
+echo "TRACKING_BRANCH2=`git symbolic-ref HEAD` # via symbolic-ref HEAD"
+echo "TRACKING_REMOTE=$TRACKING_REMOTE # branch.$LOCAL_BRANCH.remote"  # origin
+echo "REMOTE_URL=$REMOTE_URL"            # git@github.com:user/prog.git
