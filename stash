@@ -8,7 +8,7 @@ class Stash
     puts "stash [push] 'comment' : save stash with comment"
     puts "stash local 'comment'  : saves local tree only (not staged)"
     #save does the same thing
-    puts "stash [show] [#]       : show stash (list of files)"
+    puts "stash [show] [#]       : show stash (list of files) - quick diff"
     puts "stash diff [#]         : show stash (diff)"
     puts "stash pop [#]          : applies and pops stash@{#} or head"
     puts "stash apply [#]        : applies but does NOT drop stash@{#} or head"
@@ -34,7 +34,7 @@ class Stash
       show(cmd)
     when 'help'
       usage
-    when 'list', 'show', 'diff', 'pop', 'drop', 'merge', 'apply', 'save', 'push', 'local'
+    when 'list', 'show', 'stats', 'stat', 'diff', 'pop', 'drop', 'merge', 'apply', 'save', 'push', 'local'
       send(cmd,args[1])
     else
       save(cmd)
@@ -54,8 +54,10 @@ class Stash
 
   def show(stash)
     #TODO: loosing all colors
-    common :show, stash
+    common 'show --color=always --stat', stash
   end
+  alias_method :stat, :show
+  alias_method :stats, :show
 
   def diff(stash)
     common 'show --color=always', stash
