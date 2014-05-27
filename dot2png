@@ -5,7 +5,15 @@
 format=$(basename $0)
 format=${format#*2}
 
-for i in "$*" ; do
+if [ "$1" = "-o" ] ; then
+  shift
+  open="open"
+else
+  open="echo"
+fi
+
+for i in "$@" ; do
   target=${i%.*}.${format}
   dot -T$format $i -o ${target}
+  $open ${target}
 done

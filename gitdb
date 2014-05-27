@@ -4,13 +4,13 @@
 # so it takes that database name instead of defaulting to the branch 
 databasename=${1-master}
 #prune off plm_development_ if that was entered
-databasename=${databasename#plm_development_}
-databasename=${databasename#plm_test_}
+databasename=${databasename#vmdb_development_}
+databasename=${databasename#vmdb_test_}
 
 branchname=$(git branch | awk '/^\*/{print $2}')
 
-git config branch.${branchname}.database plm_development_${databasename}
-git config branch.${branchname}.test plm_test_${databasename}
+git config branch.${branchname}.database vmdb_development_${databasename}
+git config branch.${branchname}.test vmdb_test_${databasename}
 
 
 ### this assumes your database.yml configuration looks something like the following

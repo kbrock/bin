@@ -8,5 +8,12 @@ else
   #no limit
   limit='cat -'
 fi
-echo "select datname, waiting, date_trunc('second',NOW()-query_start) as runtime, current_query from pg_stat_activity where current_query <> '<IDLE>';" | psql -U postgres | $limit
+
+QUERY_COLUMN=current_query
+QUERY_COLUMN=query
+
+echo <<EOF | psql -U postgres | $limit 
+select datname, waiting, date_trunc('second',NOW()-query_start) as runtime, ${QUERY_COLUMN}
+from pg_stat_activity where ${QUERY_COLUMN} <> '<IDLE>';
+EOF 
 
