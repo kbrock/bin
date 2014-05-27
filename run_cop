@@ -1,0 +1,1 @@
+rubocop -c ~/.rubocop.yml --format simple -D "$@"
