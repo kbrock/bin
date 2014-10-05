@@ -1,11 +1,40 @@
+#!/usr/bin/env ruby
 
-LOCAL_BRANCH=`git name-rev --name-only HEAD`            # git current-branch
-TRACKING_REMOTE=`git config branch.$LOCAL_BRANCH.remote`
 
-REMOTE_URL=`git config remote.$(git current-remote).url`
 
-echo "LOCAL_BRANCH=$LOCAL_BRANCH # git name-rev --name-only HEAD"        # master
-echo "TRACKING_BRANCH=`git config branch.$LOCAL_BRANCH.merge` # branch.$LOCAL_BRANCH.merge"  # refs/heads/master
-echo "TRACKING_BRANCH2=`git symbolic-ref HEAD` # via symbolic-ref HEAD"
-echo "TRACKING_REMOTE=$TRACKING_REMOTE # branch.$LOCAL_BRANCH.remote"  # origin
-echo "REMOTE_URL=$REMOTE_URL"            # git@github.com:user/prog.git
+# LOCAL_BRANCH=`git symbolic-ref --short HEAD`
+# OLD: LOCAL_BRANCH=`git name-rev --name-only HEAD`
+# TRACKING_REMOTE=`git config branch.$LOCAL_BRANCH.remote`
+# CURRENT_REMOTE=`git current-remote` # git config config branch.$LOCAL_BRANCH.remote
+# REMOTE_URL=`git config remote.$CURRENT_REMOTE.url`
+
+
+LOCAL_BRANCH=`git symbolic-ref --short HEAD`.chomp # git current-branch
+TRACKING_BRANCH=`git config branch.#{LOCAL_BRANCH}.merge`.chomp
+#not needed
+CURRENT_REMOTE=`git config branch.#{LOCAL_BRANCH}.remote`.chomp # git current-remote
+REMOTE_URL=`git config remote.#{CURRENT_REMOTE}.url`.chomp
+
+VARS= {
+"LOCAL_BRANCH"     => "symbolic-ref",                  # master
+"TRACKING_BRANCH"  => "branch.#{LOCAL_BRANCH}.merge",  # refs/heads/master
+"CURRENT_REMOTE"   => "branch.#{LOCAL_BRANCH}.remote",
+"REMOTE_URL"       => "remote.#{CURRENT_REMOTE||"undef"}.url",  # git@github.com:user/prog.git
+}
+
+name_width = VARS.keys.collect {|n| n.length }.max
+val_width = VARS.keys.collect { |n| eval(n).length }.max
+
+VARS.each_pair do |var, comment|
+  puts "%-#{name_width}s = %-#{val_width}s # %s" % [var, eval(var), comment]
+end
+
+if CURRENT_REMOTE == ""
+  remotes = `git remote`.chomp.split.join(" ")
+  puts
+  puts "run: "
+  puts
+  puts "    git push origin HEAD -u "
+  puts
+  puts "remotes: #{remotes}"
+end

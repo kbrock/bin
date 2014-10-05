@@ -2,9 +2,16 @@
 
 #command must be of the name dot2(format)
 
-format=$(basename $0)
-format=${format#*2}
+# bail on first error
+set -e
 
+format=$(basename $0)
+# format: dot2svg:cairo => svg:cairo
+format=${format#*2}
+# extension: svg:cairo => svg
+extension=${format%:*}
+
+# -o will open the file
 if [ "$1" = "-o" ] ; then
   shift
   open="open"
@@ -13,7 +20,7 @@ else
 fi
 
 for i in "$@" ; do
-  target=${i%.*}.${format}
+  target=${i%.*}.${extension}
   dot -T$format $i -o ${target}
-  $open ${target}
+  ${open} ${target}
 done
