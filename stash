@@ -14,6 +14,8 @@ class Stash
     puts "stash apply [#]        : applies but does NOT drop stash@{#} or head"
     puts "stash merge [#]        : merges stash@{#} or head into current"
     puts "stash drop [#]         : drops/throws away stash@{#} or head"
+    puts "stash backup 'comment' : saves stash but leaves files checkedout"
+#    puts "stash word # 'comment' : rewords comment for stash@{#}"
   end
 
   def emphasize(phrase)
@@ -34,7 +36,9 @@ class Stash
       show(cmd)
     when 'help'
       usage
-    when 'list', 'show', 'stats', 'stat', 'diff', 'pop', 'drop', 'merge', 'apply', 'save', 'push', 'local'
+    when 'list', 'show', 'stats', 'stat', 'diff', 'pop', 'drop',
+         'merge', 'apply', 'save', 'push', 'local', 'backup',
+         'reword', 'word', 'mv', 'rename'
       send(cmd,args[1])
     else
       save(cmd)
@@ -93,6 +97,10 @@ class Stash
     puts `git stash save --keep-index "#{comment}"`
   end
 
+  def backup(comment)
+    save(comment)
+    apply(nil)
+  end
 end
 
 Stash.new.run(ARGV)

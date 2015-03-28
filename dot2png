@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 #command must be of the name dot2(format)
+# call it dot2pdf
 
 # bail on first error
 set -e
