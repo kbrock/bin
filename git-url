@@ -1,0 +1,79 @@
+#!/usr/bin/env ruby
+
+# current branch = migrate_miq_groups
+# git push origin -u # so it is tracking origin/migrate_miq_groups
+# 
+# hub-url 
+#    http://github.com/kbrock/manageiq/tree/migrate_miq_groups
+# hub-url origin
+#    http://github.com/kbrock/manageiq/tree/migrate_miq_groups
+# hub-url upstream
+#    http://github.com/ManageIq/manageiq/tree/migrate_miq_groups
+# hub-url origin/branch2
+#    http://github.com/kbrock/manageiq/tree/branch2
+# hub-url compare
+#    http://github.com/origin/manageiq/compare/migrate_miq_groups?expand=1
+# hub-url origin compare # create a PR
+#    http://github.com/origin/manageiq/compare/migrate_miq_groups?expand=1
+# git hub-url origin a/b
+#    http://github.com/kbrock/manageiq/tree/migrate_miq_groups/a/b
+# git hub-url origin a/b/c.rb
+#    http://github.com/kbrock/manageiq/blob/migrate_miq_groups/a/b/c.rb
+
+# url at github ($1 = remote e.g.: origin) ($2 = tree compare) ($3 = )
+
+# git alias:
+#  hub-url  = "! f() { hu="$(echo $(git remote-url $1) | sed -e 'sX^git@\\([^:]*\\):Xhttp://\\1/X' -e 'sX\\.git$XX')" ; echo "${hu}/${2:-tree}/$(git branch-name)${3}" ; }; f"
+
+# depends upon git aliases:
+#  branch-name  = "symbolic-ref -q --short HEAD"
+#  remote-name  = "!git config branch.$(git branch-name).remote"
+#  remote-url   = "! f() { git config remote.${1:-$(git remote-name)}.url ; }; f"
+
+require 'byebug'
+# echo $(git remote-url $1) | sed -e 'sX^git@\([^:]*\):Xhttp://\1/X' -e 'sX\.git$XX')
+def base_url(remote = nil, branch = nil)
+  remote_url = `git config --get remote.#{remote}.url`.chomp
+  remote_url.gsub(%r{^git@([^:]*):}){"http://#{$1}/"}.gsub(/\.git$/,'')
+end
+
+remote = ARGV[0]
+mode = ARGV[1]
+params = ARGV[2]
+
+# assume they just wanted origin if the remote looks like a mode
+# alternative is to fall back to this mode if we do not recognize branch
+# just want to make sure we still work w/ a filename
+
+remote, mode, params = 'origin', remote, mode if !params && %w(compare tree blob).include?(remote)
+remote, branch = remote.split("/") if remote
+
+# try outgit rev-parse --symbolic-full-name @{upstream}
+branch ||= `git symbolic-ref -q --short HEAD`.chomp
+remote ||= `git config branch.#{branch}.remote`.chomp # default remote for this branch ( via git push -u)
+
+# assume user gave us a param (ruby file, path) if the mode is not known
+mode, params = nil, mode if !params && mode && !%w(compare tree blob).include?(mode)
+
+if params
+  if params =~ /\=/
+    params = "?#{params}" unless params =~ /\?/
+    mode ||= "compare"
+  elsif params =~ /\./
+    # expand the file and normalize to root git?
+    params = params.gsub(/:([0-9]+)/) { "#L#{$1}" }
+    params = "/#{params}"
+    mode ||= "blob"
+  else
+    params ="/#{params}"
+    mode ||= "tree"
+  end
+else
+  mode ||= 'tree' # ***
+end
+
+params ||= '?expand=1' if mode == "compare"
+
+hu=base_url(remote, branch)
+puts "#{hu}/#{mode}/#{branch}#{params}"
+
