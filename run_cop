@@ -1,1 +1,2 @@
-rubocop -c ~/.rubocop.yml --format simple -D "$@"
+#rubocop -c ~/.rubocop.yml --format simple -D "$@"
+rubocop -c ~/.rubocop.yml --format simple "$@"

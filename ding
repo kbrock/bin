@@ -1,7 +1,10 @@
 
+# brew install terminal-notifier
+# brew linkapps terminal-notifier
+
 # message body, then the subject [sorry about that]
 # the -s means sticky
-function ding { growlnotify -s -m "$@" ; }
+function ding { terminal-notifier -message "$@" ; }
 
 if [ $# -eq 0 ] ; then
   ding "ding"

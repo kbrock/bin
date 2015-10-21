@@ -1,9 +1,16 @@
 #!/usr/bin/ruby
 
-def get_agent_names(partial)
-  Dir["#{ENV['HOME']}/Library/LaunchAgents/*#{partial}*.plist"]
+def agent_dir
+  "#{ENV['HOME']}/Library/LaunchAgents/"
 end
 
+def get_agent_names(partial)
+  Dir["#{agent_dir}/*#{partial}*.plist"]
+end
+
+# TODO get_global_agent_names
+# /Library/LaunchAgents /Library/LaunchDaemons
+# TODO get brew list names?
 def alter_service(action, service_plist)
   status=system("launchctl #{action} -w #{service_plist}")
   puts "issue" unless status
@@ -22,22 +29,35 @@ end
 # echo "apachectl $mode"
 # sudo apachectl $mode
 
-action            = ARGV[1]
-if (ARGV[0] == "list")
-  action          = "list" 
-  agent_names     = get_agent_names("*")
+ACTIONS=%w(list start load stop unload fix vi edit subl install)
+
+if ACTIONS.include?(ARGV[1])
+  action=ARGV[1]
+  agent_search=ARGV[0]||"*"
+elsif ACTIONS.include?(ARGV[0])
+  action=ARGV[0]
+  agent_search=ARGV[1]||"*"
 else
-  agent_names     = get_agent_names(ARGV[0])
+  puts "usage: service service_name [help|list|start|stop|vi|fix|install] "
+  exit 1
 end
 
-short_agent_names = agent_names.map {|an| an.split("/").last}
+if action == "install"
+  if File.exist?(agent_search)
+    `cp #{agent_search} #{agent_dir}`
+  end
+  exit
+end
+
+agent_names     = get_agent_names(agent_search)
+short_agent_names = agent_names.map { |an| an.split("/").last }
 
 if short_agent_names.length == 0
-  puts "service #{ARGV[0]} not found"
+  puts "service #{agent_search} not found"
   puts short_agent_names.join("\n")
   exit 1
 elsif short_agent_names.length > 1
-  puts "ambigious service name #{ARGV[0]}"
+  puts "ambigious service name #{agent_search}" unless agent_search == "*"
   puts short_agent_names.join("\n")
   exit 1
 end
@@ -51,18 +71,25 @@ when "start", "load"
   alter_service("load", agent_names.first)
 when "stop", "unload"
   alter_service("unload", agent_names.first)
+#when "restart", "reload"
+  # stop
+  # ensure ps aux says it isn't running?
+  # start
+#when "dir"
+  # grep the directory from the xml file
+  # can we cd into the directory for the user
+#when "log"
+  # display the startup log
 when "fix"
   case short_agent_names.first
   when /postgres/
+    # may need to add missing directories?
     `rm /usr/local/var/postgres/postmaster.pid`
   else
     puts "only know how to fix postgres #{short_agent_names}"
     exit 1
   end
 when "vi", "edit", "subl"
-  `subl #{agent_names.first}`
-#when "help", "-h", nil
-else
-  puts "usage: service service_name [help|list|start|stop|vi|fix] "
-  exit 1
+  editor=ENV["EDITOR"] || "subl"
+  exec("#{editor} #{agent_names.first}")
 end

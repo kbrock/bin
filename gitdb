@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
 
+branchname=$(git symbolic-ref -q --short HEAD)
 # add database name into your git config file
 # so it takes that database name instead of defaulting to the branch 
-databasename=${1-master}
+suffix=${1-_${branchname}}
 #prune off plm_development_ if that was entered
-databasename=${databasename#vmdb_development_}
-databasename=${databasename#vmdb_test_}
+suffix=${suffix#*_development}
+suffix=${suffix#*_test}
+suffix=${suffix//\//_}
 
-branchname=$(git branch | awk '/^\*/{print $2}')
 
-git config branch.${branchname}.database vmdb_development_${databasename}
-git config branch.${branchname}.test vmdb_test_${databasename}
+#git config branch.${branchname}.database vmdb_development_${suffix}
+#git config branch.${branchname}.test vmdb_test_${suffix}
+
+echo "git config branch.${branchname}.suffix ${suffix}"
+git config branch.${branchname}.suffix ${suffix}
+
+# <%= `git config branch.$(git symbolic-ref -q --short HEAD).suffix`.chomp)
 
 
 ### this assumes your database.yml configuration looks something like the following

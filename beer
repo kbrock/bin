@@ -1,0 +1,67 @@
+#!/usr/bin/env ruby
+
+# rake => bundle exec rake
+# test/* => bundle exec ruby -Itest
+# spec/* => bundle exec rspec (or ruby?)
+
+STDOUT.sync = true
+
+class Beer
+  attr_accessor :cmd, :args
+  def initialize(args)
+    @cmd = args.shift
+    @args = args
+  end
+
+  def tweak_cmd
+    @cmd ||= "rake"
+    if cmd == "gn"
+      @cmd = "rspec"
+      @args = `git diff master --name-only`.chomp.split
+    elsif cmd == "head"
+      @cmd = "rspec"
+      @args = `git diff HEAD --name-only`.chomp.split
+    elsif cmd =~ /^(s|c|db|g)$/
+      @cmd = "rails #{cmd}"
+    # elsif cmd =~ %r{^test/}
+    #   args.unshift cmd
+    #   cmd = "ruby -I test"
+    elsif cmd =~ %r{(:?[^r]|^)(spec|app|db)/}
+      args.unshift cmd
+      @cmd = "rspec" # ruby -I rspec
+    end
+    self
+  end
+
+  def tweak_args
+    # @args = args.select { |n| n !~ /rspec/ }.map { |f| f.gsub(/^.\//, '')}
+    if cmd == "rspec"
+      @args = %w(-I spec) + args.map { |x|
+                x.sub("migrate", "migrations").gsub(%r{(?:./)?(?:app|db)/(.*).rb}) { "spec/#{$1}_spec.rb" }
+              }.select { |x| x =~ /_spec.rb/ }
+    end
+    @args = @args.uniq
+    self
+  end
+
+  def cmd_line
+    %w(bundle exec) + [cmd] + args
+  end
+
+  def print
+    puts cmd_line.join " "
+    self
+  end
+
+  def run
+    exec *cmd_line
+    self
+  end
+
+  def self.run(args = ARGV)
+    new(args).tweak_cmd.tweak_args.print.run
+  end
+end
+
+Beer.run
+
