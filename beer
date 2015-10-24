@@ -15,17 +15,20 @@ class Beer
 
   def tweak_cmd
     @cmd ||= "rake"
-    if cmd == "gn"
+    if cmd == "gn" || cmd == "master"
       @cmd = "rspec"
       @args = `git diff master --name-only`.chomp.split
     elsif cmd == "head"
       @cmd = "rspec"
       @args = `git diff HEAD --name-only`.chomp.split
-    elsif cmd =~ /^(s|c|db|g)$/
+    elsif cmd =~ /^(s|c|db|g|generate|server|console|dbconsole)$/
       @cmd = "rails #{cmd}"
     # elsif cmd =~ %r{^test/}
     #   args.unshift cmd
     #   cmd = "ruby -I test"
+    elsif cmd =~ %r{:[a-z]}
+      args.unshift cmd
+      @cmd = "rake"
     elsif cmd =~ %r{(:?[^r]|^)(spec|app|db)/}
       args.unshift cmd
       @cmd = "rspec" # ruby -I rspec
@@ -34,11 +37,13 @@ class Beer
   end
 
   def tweak_args
-    # @args = args.select { |n| n !~ /rspec/ }.map { |f| f.gsub(/^.\//, '')}
     if cmd == "rspec"
-      @args = %w(-I spec) + args.map { |x|
+            #%w(-I spec) + 
+      @args = args.map { |x|
                 x.sub("migrate", "migrations").gsub(%r{(?:./)?(?:app|db)/(.*).rb}) { "spec/#{$1}_spec.rb" }
-              }.select { |x| x =~ /_spec.rb/ }
+              }.select { |x| x =~ /_spec.rb/ }.select { |x| File.exists?(x.gsub(/:[0-9]+$/,'')) }
+    elsif cmd == "test"
+      @args = %w(-I test) + args.map { |x| x }
     end
     @args = @args.uniq
     self
