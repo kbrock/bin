@@ -21,7 +21,7 @@ class Beer
     elsif cmd == "head" || cmd == "gn"
       @cmd = "rspec"
       @args = `git diff HEAD --name-only`.chomp.split
-    elsif cmd =~ /^(s|c|db|g|generate|server|console|dbconsole)$/
+    elsif cmd =~ /^(s|c|db|g|r|generate|server|console|dbconsole|runner)$/
       @args.unshift cmd
       @cmd = "rails"
     # elsif cmd =~ %r{^test/}
@@ -57,12 +57,8 @@ class Beer
         if !fn
         elsif File.exists?(fn)
           [fn, line].join
-        elsif fn !~ /\//
-          Dir.glob("**/#{fn}").select { |x|
-            x.to_s !~ /factories|work/
-          }.map { |ref|
-           "#{ref.to_s}#{line}"
-          }
+        elsif !fn.include?('/')
+          Dir.glob("**/#{fn}").select { |y| y.to_s !~ /factories|work/ }.map { |ref| "#{ref.to_s}#{line}" }
         end
       }.compact
     elsif cmd == "test"
@@ -82,8 +78,7 @@ class Beer
   end
 
   def run
-    exec *cmd_line
-    self
+    exec(*cmd_line)
   end
 
   def self.run(args = ARGV)
