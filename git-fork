@@ -1,0 +1,86 @@
+#!/usr/bin/env ruby
+# git fork git@github.com:rails/rails.git
+# git fork rails/rails
+# git fork rails
+# fail: git fork kbrock/rails # don't setup an upstream if remote = 
+
+class GitFork
+  attr_accessor :user
+
+  def run(env, remote = nil, upstream = nil)
+    parse_env(env)
+    repo, origin, upstream = parse_params(remote, upstream)
+    if repo && origin
+      create_repo(repo, origin, upstream)
+    else
+      STDERR.puts "git fork <origin>"
+      exit 1
+    end
+  end
+
+#   private
+
+  def parse_env(env)
+    @user = env["USER"]
+  end
+
+  # @param remote [String] see #remote_url
+  # @param alt [String] upstream if it is ambigious
+  # @return [String, String, String] repo, origin, upstream
+  def parse_params(remote, alt = nil)
+    return unless remote
+    remote, repo, url = split_url(remote)
+    return unless remote && repo
+    if alt
+      if remote != user
+        [repo, alt, url]
+      else
+        [repo, url, alt]
+      end
+    elsif repo != user
+      [repo, "git@github.com:#{user}/#{repo}.git", url]
+    else # not good
+      [repo, url]
+    end
+  end
+
+  # @param remote_url [String] a remote, remote/repo, OR remote_url to be parsed
+  # @return [String, String, String] remote name, repo name, url
+  def split_url(url)
+    if (data = url.match(%r{git@github.com:([^/]+)/([^/]+).git}))
+      remote, repo = data.captures
+    elsif (data = url.match(%r{https?://.*github.com/([^/]+)/([^/]+)$}))
+      remote, repo = data.captures
+      url = "git@github.com:#{remote}/#{repo}.git"
+    else
+      remote, repo = url.split("/")
+      repo ||= remote
+      url = "git@github.com:#{remote}/#{repo}.git"
+    end
+    [remote, repo, url]
+  end
+
+  def create_repo(repo, origin, upstream)
+    if upstream
+      # could pass repo as 3rd parameter
+      git("clone", upstream, "--origin", "upstream")
+      puts "cd #{repo}"
+      Dir.chdir(repo)
+      git("remote", "add", "origin", origin)
+      git("fetch", "origin")
+    else
+      git("clone", origin, repo)
+    end
+  end
+
+  def git(*args)
+    puts "git #{args.join(" ")}"
+    `git #{args.join(" ")}`.chomp
+  end
+end
+
+if __FILE__ == $0
+  # puts ENV.inspect
+  # puts ARGV.inspect
+  GitFork.new.run(ENV, *ARGV)
+end

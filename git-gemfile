@@ -1,0 +1,3 @@
+touch Gemfile.lock.$(git branch-name)
+git checkout HEAD
+bundle
