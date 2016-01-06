@@ -27,42 +27,46 @@ class Beer
     # elsif cmd =~ %r{^test/}
     #   args.unshift cmd
     #   cmd = "ruby -I test"
-    elsif cmd =~ %r{:[a-z]}
+    elsif cmd =~ /^(cop|rubocop|rubo)$/
+      @cmd = "rubocop"
+    elsif cmd =~ %r{:[a-z]|-T}
       args.unshift cmd
       @cmd = "rake"
-    elsif cmd =~ %r{(:?[^r]|^)(spec|app|db)/} || cmd =~ /_spec.rb/
+    elsif cmd =~ %r{(:?[^r]|^)(spec|app|db|lib)/} || cmd =~ /_spec.rb/
       args.unshift cmd
       @cmd = "rspec" # ruby -I rspec
     end
     self
   end
 
-  def exists?(fn)
-    File.exists?(x.gsub(/:[0-9]+$/,''))
+  def track_down(fn, line = nil) 
+    if !fn
+      []
+    elsif File.exists?(fn)
+      [fn, line].join
+    elsif !fn.include?('/')
+      Dir.glob("**/#{fn}").select { |y| y.to_s !~ /factories|work/ }.map { |ref| "#{ref.to_s}#{line}" }
+    else
+      []
+    end
   end
 
   def tweak_args
     if cmd == "rspec" || cmd == "subl"
-      @args = args.map { |x|
+      @args = args.flat_map do |x|
         # convert models to spec names
         # migrations have a slightly different name, fix that too
-        x.sub("migrate", "migrations").gsub(%r{(?:./)?(?:app|db)/(.*).rb}) { "spec/#{$1}_spec.rb" }
-      # moved into flat_map (running match anyway)
-      # }.select { |x|
-      #   # only specs flow through
-      #   x =~ /_spec.rb(:[0-9]+)?/
-      }.flat_map { |x| 
+
+        next(x) if x.start_with?("-")
+        x = x.sub("migrate", "migrations").gsub(%r{(?:./)?(?:app|db)/(.*).rb}) { "spec/#{$1}_spec.rb" }
+
         _, fn, line = x.match(/^(.*_spec.rb)(:[0-9]+)?$/).to_a
-        
-        if !fn
-        elsif File.exists?(fn)
-          [fn, line].join
-        elsif !fn.include?('/')
-          Dir.glob("**/#{fn}").select { |y| y.to_s !~ /factories|work/ }.map { |ref| "#{ref.to_s}#{line}" }
-        end
-      }.compact
-    elsif cmd == "test"
-      @args = %w(-I test) + args.map { |x| x }
+        track_down(fn, line)
+      end
+#    elsif cmd == "test"
+#      @args = %w(-I test) + args.map { |x| x }
+    elsif cmd == "rubocop"
+      @args = args.flat_map { |x| track_down(x) }
     end
     @args = @args.uniq
     self
@@ -73,12 +77,16 @@ class Beer
   end
 
   def print
-    puts cmd_line.join " "
+    puts (cmd_line + ["#", mug, mug]).join " "
     self
   end
 
   def run
     exec(*cmd_line)
+  end
+
+  def mug
+    "\xF0\x9F\x8D\xBA"
   end
 
   def self.run(args = ARGV)

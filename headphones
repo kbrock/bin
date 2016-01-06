@@ -1,0 +1,81 @@
+#!/usr/bin/env ruby
+
+# install:
+# brew install switchaudio-osx
+# Usage: /usr/local/Cellar/switchaudio-osx/1.0.0/SwitchAudioSource [-a] [-c] [-t type] [-n] -s device_name
+#   -a             : shows all devices
+#   -c             : shows current device
+# 
+#   -t type        : device type (input/output/system).  Defaults to output.
+#   -n             : cycles the audio device to the next one
+#   -s device_name : sets the audio device to the given device by name
+
+require 'optparse'
+
+class Headphones
+  attr_accessor :verbose
+  attr_accessor :target
+
+  # @param mode [:input, :output] which sound source
+  # @param name [Regexp|String] name of the device to match
+  # @return [String] official name of device
+  #
+  # find_source(:input, "Logitech")
+  # SwitchAudioSource -t input -a
+  # Built-in Microphone (input)
+  # Logitech USB Headset (input)
+  # ==> "Logitech USB Headset"
+  def find_source(mode, name)
+    name = Regexp.new(name)
+    sources(mode).select { |n| n =~ name }.first.sub(/ \([a-z]+\)$/,'')
+  end
+
+  def parse(args)
+    OptionParser.new do |opt|
+      opt.banner = "Usage: aab [-n #] [-c #] [-h host] [-t token] [-apple] [-google]"
+      opt.on('-v', '--verbose', "Verbose")  { |v| @verbose = v }
+      opt.parse!(args)
+    end
+
+    @target = args[0] || "Logitech"
+    self
+  end
+
+  def current(mode = :output)
+    switch(mode, "-c").tap { |target| puts "%-10s source: #{target.first}" % "current" unless verbose }
+  end
+
+  # @param mode [:input|output] device mode
+  def sources(mode = :output)
+    switch(mode, "-a")
+  end
+
+  def set_source(mode, name)
+    if (target = find_source(mode, name))
+      puts "set %-6s source: #{target}" % mode unless verbose
+      switch(mode, target)
+    end
+  end
+
+  def run
+    current(:output)
+    set_source(:input, target)
+    set_source(:output, target)
+  end
+
+  def self.run(args)
+    new.parse(args).run
+  end
+
+  private
+
+  def switch(mode, device = nil)
+    return unless device
+    device = "-s \"#{device}\"" unless device.start_with?("-")
+    cmd = "SwitchAudioSource -t #{mode} #{device}"
+    puts cmd if verbose
+    `#{cmd}`.chomp.tap { |r| puts r,"" if verbose }.split("\n")
+  end
+end
+
+Headphones.run(ARGV)

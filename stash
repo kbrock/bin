@@ -37,7 +37,7 @@ class Stash
     when 'help'
       usage
     when 'list', 'show', 'stats', 'stat', 'diff', 'pop', 'drop',
-         'merge', 'apply', 'save', 'push', 'local', 'backup',
+         'merge', 'apply', 'pluck', 'save', 'push', 'local', 'backup',
          'reword', 'word', 'mv', 'rename', 'head'
       puts public_send(cmd, args[1])
     else
@@ -68,6 +68,9 @@ class Stash
 
   def diff(stash)
     common 'show --color=always', stash
+    # cmd = 'show --color=always'
+    # stash ||= "0"
+    # exec "git","stash #{cmd} stash@{#{stash}} | less -r"
   end
 
   def pop(stash)
@@ -77,6 +80,7 @@ class Stash
   def apply(stash = nil)
     common :apply, stash
   end
+  alias_method :pluck, :apply
 
   def drop(stash)
     common :drop, stash
@@ -85,6 +89,7 @@ class Stash
   def merge(stash)
     stash ||= "0"
     `git stash show -p stash@{#{stash}} | git apply && git stash drop stash@{#{stash}}`
+    # apply, drop?
   end
 
   def save(comment)

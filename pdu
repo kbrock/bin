@@ -1,0 +1,62 @@
+#!/bin/bash
+
+# references:
+#   main: https://wiki.postgresql.org/wiki/Disk_Usage
+#   alt:  http://www.postgresql.org/docs/9.0/static/disk-usage.html
+function usage() {
+  echo "usage: $(basename $0) [-h] [-v] [-l limit] [dbname]" >&2
+  echo "    shows disk usage for a database or all databases" >&2
+  echo "    -h shows this help message"
+  echo "    -v vacuums the db first"
+  echo "    -l limits the results (default: 20)"
+  exit 1
+}
+
+# defaulting limit to 20
+limit=20
+
+while getopts "vhl:" opt ; do
+  case $opt in
+    h) usage ; exit 1 ;;
+    v) vacuum='vacuum full;' ;;
+    l) limit=$OPTARG ;;
+    \?) echo "Invalid option: -$OPTARG" >&2 ;;
+  esac
+done
+shift $((OPTIND-1))
+
+dbname="$1"
+tablename="$2"
+
+# which database is the biggest
+if [ -z "${dbname}" ] ; then
+    psql postgres << SQL
+    SELECT d.datname AS Name,  pg_catalog.pg_get_userbyid(d.datdba) AS Owner,
+        CASE WHEN pg_catalog.has_database_privilege(d.datname, 'CONNECT')
+            THEN pg_catalog.pg_size_pretty(pg_catalog.pg_database_size(d.datname))
+            ELSE 'No Access'
+        END AS Size
+      FROM pg_catalog.pg_database d
+      ORDER BY
+        CASE WHEN pg_catalog.has_database_privilege(d.datname, 'CONNECT')
+            THEN pg_catalog.pg_database_size(d.datname)
+            ELSE NULL
+        END DESC -- nulls first
+      LIMIT ${limit};
+SQL
+else # which table objects are the biggest?
+  psql "${dbname}" << SQL
+  ${vacuum}
+  SELECT
+      CASE WHEN nspname = 'public'
+        THEN relname
+        ELSE nspname || '.' || relname
+      END AS "relation",
+          pg_size_pretty(pg_relation_size(C.oid)) AS "size"
+    FROM  pg_class C
+          LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
+    WHERE nspname NOT IN ('pg_catalog', 'information_schema')
+    ORDER BY pg_relation_size(C.oid) DESC
+    LIMIT ${limit};
+SQL
+fi

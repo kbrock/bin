@@ -44,7 +44,10 @@ end
 
 if action == "install"
   if File.exist?(agent_search)
+    puts "installing #{agent_search}"
     `cp #{agent_search} #{agent_dir}`
+  else
+    puts "cant find #{agent_search} to install"
   end
   exit
 end
