@@ -30,50 +30,70 @@
 #  remote-name  = "!git config branch.$(git branch-name).remote"
 #  remote-url   = "! f() { git config remote.${1:-$(git remote-name)}.url ; }; f"
 
-require 'byebug'
-# echo $(git remote-url $1) | sed -e 'sX^git@\([^:]*\):Xhttp://\1/X' -e 'sX\.git$XX')
-def base_url(remote = nil, branch = nil)
-  remote_url = `git config --get remote.#{remote}.url`.chomp
-  remote_url.gsub(%r{^git@([^:]*):}){"http://#{$1}/"}.gsub(/\.git$/,'')
-end
-
-remote = ARGV[0]
-mode = ARGV[1]
-params = ARGV[2]
-
-# assume they just wanted origin if the remote looks like a mode
-# alternative is to fall back to this mode if we do not recognize branch
-# just want to make sure we still work w/ a filename
-
-remote, mode, params = 'origin', remote, mode if !params && %w(compare tree blob).include?(remote)
-remote, branch = remote.split("/") if remote
-
-# try outgit rev-parse --symbolic-full-name @{upstream}
-branch ||= `git symbolic-ref -q --short HEAD`.chomp
-remote ||= `git config branch.#{branch}.remote`.chomp # default remote for this branch ( via git push -u)
-
-# assume user gave us a param (ruby file, path) if the mode is not known
-mode, params = nil, mode if !params && mode && !%w(compare tree blob).include?(mode)
-
-if params
-  if params =~ /\=/
-    params = "?#{params}" unless params =~ /\?/
-    mode ||= "compare"
-  elsif params =~ /\./
-    # expand the file and normalize to root git?
-    params = params.gsub(/:([0-9]+)/) { "#L#{$1}" }
-    params = "/#{params}"
-    mode ||= "blob"
-  else
-    params ="/#{params}"
-    mode ||= "tree"
+class GitUrl
+  def run(remote = nil, mode = nil, params = nil)
+    remote, branch, mode, params = parse_params(remote, mode, params)
+    hu = base_url(remote, branch)
+    puts "#{hu}/#{mode}/#{branch}#{params}"
   end
-else
-  mode ||= 'tree' # ***
+
+  private
+
+  def parse_params(remote, mode, params)
+    # assume they want a file if the remote is a filename
+    if !params && !mode && File.exist?(remote) && ! %w(master origin upstream).include?(remote)
+      remote, params = 'origin', remote
+    end
+
+    # assume they just wanted origin if the remote looks like a mode
+    # alternative is to fall back to this mode if we do not recognize branch
+    # just want to make sure we still work w/ a filename
+
+    remote, mode, params = 'origin', remote, mode if !params && %w(compare tree blob).include?(remote)
+    remote, branch = remote.split("/") if remote
+
+    branch = "master" if remote == "upstream" && branch.nil?
+
+    # try out git rev-parse --symbolic-full-name @{upstream}
+    branch ||= git("symbolic-ref -q --short HEAD")
+    remote ||= git("config branch.#{branch}.remote") # default remote for this branch ( via git push -u)
+
+    # assume user gave us a param (ruby file, path) if the mode is not known
+    mode, params = nil, mode if !params && mode && !%w(compare tree blob).include?(mode)
+
+    if params
+      if params =~ /\=/
+        params = "?#{params}" unless params =~ /\?/
+        mode ||= "compare"
+      elsif params =~ /\./
+        # expand the file and normalize to root git?
+        params = params.gsub(/:([0-9]+)/) { "#L#{$1}" }
+        params = "/#{params}"
+        mode ||= "blob"
+      else
+        params ="/#{params}"
+        mode ||= "tree"
+      end
+    else
+      mode ||= 'tree' # ***
+    end
+
+    params ||= '?expand=1' if mode == "compare"
+
+    [remote, branch, mode, params]
+  end
+
+  # echo $(git remote-url $1) | sed -e 'sX^git@\([^:]*\):Xhttp://\1/X' -e 'sX\.git$XX')
+  def base_url(remote = nil, branch = nil)
+    remote_url = git("config --get remote.#{remote}.url")
+    remote_url.gsub(%r{^git@([^:]*):}){"http://#{$1}/"}.gsub(/\.git$/,'')
+  end
+
+  def git(*args)
+    `git #{args.join(" ")}`.chomp
+  end
 end
 
-params ||= '?expand=1' if mode == "compare"
-
-hu=base_url(remote, branch)
-puts "#{hu}/#{mode}/#{branch}#{params}"
-
+if __FILE__ == $0
+  GitUrl.new.run(*ARGV)
+end
