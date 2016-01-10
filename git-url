@@ -20,28 +20,21 @@
 # git hub-url origin a/b/c.rb
 #    http://github.com/kbrock/manageiq/blob/migrate_miq_groups/a/b/c.rb
 
-# url at github ($1 = remote e.g.: origin) ($2 = tree compare) ($3 = )
-
-# git alias:
-#  hub-url  = "! f() { hu="$(echo $(git remote-url $1) | sed -e 'sX^git@\\([^:]*\\):Xhttp://\\1/X' -e 'sX\\.git$XX')" ; echo "${hu}/${2:-tree}/$(git branch-name)${3}" ; }; f"
-
-# depends upon git aliases:
-#  branch-name  = "symbolic-ref -q --short HEAD"
-#  remote-name  = "!git config branch.$(git branch-name).remote"
-#  remote-url   = "! f() { git config remote.${1:-$(git remote-name)}.url ; }; f"
-
 class GitUrl
-  def run(remote = nil, mode = nil, params = nil)
-    remote, branch, mode, params = parse_params(remote, mode, params)
-    hu = base_url(remote, branch)
-    puts "#{hu}/#{mode}/#{branch}#{params}"
+  attr_accessor :remote, :branch, :mode, :params
+
+  def run(_env, argv)
+    parse_args(argv)
+    puts "#{base_url}/#{mode}/#{branch}#{params}"
   end
 
-  private
+  def parse_args(argv)
+    @remote, @branch, @mode, @params = extract_args(*argv)
+  end
 
-  def parse_params(remote, mode, params)
+  def extract_args(remote = nil, mode = nil, params = nil)
     # assume they want a file if the remote is a filename
-    if !params && !mode && File.exist?(remote) && ! %w(master origin upstream).include?(remote)
+    if !params && !mode && (remote.nil? || (! %w(master origin upstream).include?(remote) && File.exist?(remote)))
       remote, params = 'origin', remote
     end
 
@@ -84,8 +77,11 @@ class GitUrl
   end
 
   # echo $(git remote-url $1) | sed -e 'sX^git@\([^:]*\):Xhttp://\1/X' -e 'sX\.git$XX')
-  def base_url(remote = nil, branch = nil)
-    remote_url = git("config --get remote.#{remote}.url")
+  # @param remote_url [String] git@domain:user/repo.git
+  # @return http://domain/user/repo/
+  def base_url
+    # can we leverage url for?
+    remote_url = git("config --get remote.#{remote}.url") # TODO: pass in
     remote_url.gsub(%r{^git@([^:]*):}){"http://#{$1}/"}.gsub(/\.git$/,'')
   end
 
@@ -95,5 +91,5 @@ class GitUrl
 end
 
 if __FILE__ == $0
-  GitUrl.new.run(*ARGV)
+  GitUrl.new.run(ENV, ARGV)
 end

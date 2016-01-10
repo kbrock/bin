@@ -1,3 +1,4 @@
+# touch a gemfile, so the gemfile lock will be pegged to this file
 touch Gemfile.lock.$(git branch-name)
 git checkout HEAD
 bundle

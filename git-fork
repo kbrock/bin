@@ -7,7 +7,8 @@
 class GitFork
   attr_accessor :user
 
-  def run(env, remote = nil, upstream = nil)
+  def run(env, argv)
+    remote, upstream = argv
     parse_env(env)
     repo, origin, upstream = parse_params(remote, upstream)
     if repo && origin
@@ -82,5 +83,5 @@ end
 if __FILE__ == $0
   # puts ENV.inspect
   # puts ARGV.inspect
-  GitFork.new.run(ENV, *ARGV)
+  GitFork.new.run(ENV, ARGV)
 end

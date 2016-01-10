@@ -1,5 +1,6 @@
 #!/bin/bash
 
+headsha=$(git rev-parse HEAD)
 git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/heads/ | while read k; do
   # change color for these via auto
 
@@ -31,8 +32,7 @@ git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/heads/ |
 #   git_status=36
 # fi
 
-
-  if [ `git rev-parse $k` = `git rev-parse HEAD` ] ; then
+  if [[ `git rev-parse $k` = ${headsha} ]] ; then
     c='%x1b[1m'
   elif git diff --quiet ...$k ; then
     c='%x1b[90m'
