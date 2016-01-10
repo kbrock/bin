@@ -1,11 +1,15 @@
-#!/usr/bin/ruby
+#!/usr/bin/env ruby
 
 def agent_dir
-  "#{ENV['HOME']}/Library/LaunchAgents/"
+  "#{ENV['HOME']}/Library/LaunchAgents"
 end
 
 def get_agent_names(partial)
   Dir["#{agent_dir}/*#{partial}*.plist"]
+end
+
+def get_plist_options(partial)
+  Dir["/usr/local/opt/*#{partial}*/*.plist"]
 end
 
 # TODO get_global_agent_names
@@ -43,11 +47,24 @@ else
 end
 
 if action == "install"
-  if File.exist?(agent_search)
+  if !(previous=get_agent_names(agent_search)).empty?
+    puts "already installed #{agent_search}: #{previous.first}"
+  elsif File.exist?(agent_search)
     puts "installing #{agent_search}"
-    `cp #{agent_search} #{agent_dir}`
+    puts "cp #{agent_search} #{agent_dir}/"
+    `cp #{agent_search} #{agent_dir}/`
   else
-    puts "cant find #{agent_search} to install"
+    options = get_plist_options(agent_search)
+    if options.count == 0
+      puts "could not find plist for #{agent_search}"
+    elsif options.count == 1
+      puts "installing #{options.first.split("/").last}"
+      puts "cp #{options.first} #{agent_dir}/"
+      `cp #{options.first} #{agent_dir}/`
+    else
+      puts "ambigious #{agent_search}:"
+      options.each { |option| puts "  #{option.split("/").last}"}
+    end
   end
   exit
 end
