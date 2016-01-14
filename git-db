@@ -36,26 +36,27 @@ suffix=${suffix//\//_}
 echo "git config branch.${branchname}.suffix ${suffix}"
 git config branch.${branchname}.suffix ${suffix}
 
-# <%= `git config branch.$(git symbolic-ref -q --short HEAD).suffix`.chomp)
+exit
+database.yml:
 
+# PostgreSQL
+#
+# <%   $db_count ||=0 ; $db_count +=1 %>
+# <%   db_suffix = `git config branch.$(git symbolic-ref -q --short HEAD).suffix`.chomp rescue nil %>
+# <%   evm_version = File.read(File.join(Rails.root, 'VERSION')).chomp rescue 'master' %>
+# <%   db_suffix ||= (evm_version == 'master') ? '' : "_#{evm_version.split('.')[0..1].join('_')}" %>
+# < %   STDERR.puts "** EVM vmdb_#{Rails.env.to_s}#{db_suffix} ** #{$db_count}" % >
+---
+base: &base
+  adapter: postgresql
+  encoding: utf8
+  username: postgres
+  pool: 5
+  wait_timeout: 5
+  min_messages: warning
+  region: 5
 
-### this assumes your database.yml configuration looks something like the following
-# <% require 'grit' ; r = Grit::Repo.new(Rails.root); branch_name = (r.head && r.head.name)||'master' %>
-# development:
-#   adapter: postgresql
-#   database: <%= r.config["branch.#{branch_name}.database"] || "plm_development_#{branch_name}" %>
-#   host: localhost
-#   username: postgres
-#   password:
-#   pool: 8
-#   encoding: utf8
-# test: &test
-#   adapter: postgresql
-#   database: <%= r.config["branch.#{branch_name}.test"] || "plm_test_#{branch_name}" %>
-#   host: localhost
-#   username: postgres
-#   password: 
-#   min_messages: warning
-# cucumber:
-#   <<: *test
-
+development:
+  <<: *base
+  database: vmdb_development<%=db_suffix %>
+  min_messages: notice
