@@ -3,16 +3,15 @@
 branchname=$(git symbolic-ref -q --short HEAD)
 # add database name into your git config file
 # so it takes that database name instead of defaulting to the branch 
-suffix=${1-_${branchname}}
+suffix=${1}
 
-if [[ "${suffix}" != [-_]* ]] ; then
-  suffix="_${suffix}"
-fi
-
-if [[ "${suffix}" = "-v" ]] ; then
+if [[ -z "${suffix}" || "${sufix}" = "-v" ]] ; then
+  echo "options: -b to set to branch name, -X to clear"
+  echo
   echo "current sufix '$(git config --get branch.$(git branch-name).suffix)'"
   exit
 fi
+
 if [[ "${suffix}" = "-X" ]] ; then
   echo "sufix was '$(git config --get branch.$(git branch-name).suffix)'"
   git config --unset-all -- branch.${branchname}.suffix
@@ -20,11 +19,16 @@ if [[ "${suffix}" = "-X" ]] ; then
   exit
 fi
 
+if [[ "${suffix}" = "-b" ]] ; then
+  suffix="_${branchname}"
+elif [[ "${suffix}" != [-_]* ]] ; then
+  suffix="_${suffix}"
+fi
+
 #prune off plm_development_ if that was entered
 suffix=${suffix#*_development}
 suffix=${suffix#*_test}
 suffix=${suffix//\//_}
-
 
 #git config branch.${branchname}.database vmdb_development_${suffix}
 #git config branch.${branchname}.test vmdb_test_${suffix}
