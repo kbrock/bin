@@ -33,7 +33,7 @@ end
 # echo "apachectl $mode"
 # sudo apachectl $mode
 
-ACTIONS=%w(list start load stop unload fix vi edit subl install)
+ACTIONS=%w(list start load stop unload fix vi edit subl install status)
 
 if ACTIONS.include?(ARGV[1])
   action=ARGV[1]
@@ -42,7 +42,7 @@ elsif ACTIONS.include?(ARGV[0])
   action=ARGV[0]
   agent_search=ARGV[1]||"*"
 else
-  puts "usage: service service_name [help|list|start|stop|vi|fix|install] "
+  puts "usage: service service_name [help|list|start|stop|vi|fix|install|status]"
   exit 1
 end
 
@@ -106,10 +106,19 @@ when "fix"
     # may need to add missing directories?
     `rm /usr/local/var/postgres/postmaster.pid`
   else
-    puts "only know how to fix postgres #{short_agent_names}"
+    puts "only know how to fix postgres not #{short_agent_names.inspect}"
     exit 1
   end
 when "vi", "edit", "subl"
   editor=ENV["EDITOR"] || "subl"
   exec("#{editor} #{agent_names.first}")
+when "status"
+  case short_agent_names.first
+  when /postgres/
+    `pg_isready -q`
+    puts $? ? "postgres running" : "postgres down"
+  else
+    puts "only supports postgres not #{short_agent_names.inspect}"
+    exit 1
+  end
 end
