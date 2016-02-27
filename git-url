@@ -35,21 +35,21 @@ class GitUrl
   def extract_args(remote = nil, mode = nil, params = nil)
     # assume they want a file if the remote is a filename
     if !params && !mode && (remote.nil? || (! %w(master origin upstream).include?(remote) && File.exist?(remote)))
-      remote, params = 'origin', remote
+      remote, params = cur_remote, remote
     end
 
     # assume they just wanted origin if the remote looks like a mode
     # alternative is to fall back to this mode if we do not recognize branch
     # just want to make sure we still work w/ a filename
 
-    remote, mode, params = 'origin', remote, mode if !params && %w(compare tree blob).include?(remote)
+    remote, mode, params = cur_remote, remote, mode if !params && %w(compare tree blob).include?(remote)
     remote, branch = remote.split("/") if remote
 
     branch = "master" if remote == "upstream" && branch.nil?
 
     # try out git rev-parse --symbolic-full-name @{upstream}
-    branch ||= git("symbolic-ref -q --short HEAD")
-    remote ||= git("config branch.#{branch}.remote") # default remote for this branch ( via git push -u)
+    branch ||= cur_branch
+    remote ||= cur_remote(branch)
 
     # assume user gave us a param (ruby file, path) if the mode is not known
     mode, params = nil, mode if !params && mode && !%w(compare tree blob).include?(mode)
@@ -74,6 +74,14 @@ class GitUrl
     params ||= '?expand=1' if mode == "compare"
 
     [remote, branch, mode, params]
+  end
+
+  def cur_branch
+    git("symbolic-ref -q --short HEAD")
+  end
+
+  def cur_remote(branch = cur_branch)
+    git("config branch.#{branch}.remote")
   end
 
   # echo $(git remote-url $1) | sed -e 'sX^git@\([^:]*\):Xhttp://\1/X' -e 'sX\.git$XX')
