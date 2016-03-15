@@ -1,5 +1,7 @@
 #!/usr/bin/env ruby
 
+require 'pathname'
+
 # add database name into your git config file
 # so it takes that database name instead of defaulting to the branch 
 class GitDb
@@ -14,6 +16,7 @@ class GitDb
       puts "options:"
       puts "   -b set suffix to branch name"
       puts "   -X clear suffix"
+      puts "   -f forces the links to be set again"
       puts
       return
     end
@@ -22,26 +25,29 @@ class GitDb
       @suffix = ''
     elsif suffix == "-b"
       @suffix = "_#{branchname}"
-    elsif
+    elsif suffix == "-f"
+      @suffix = cur_suffix
+      force = true
+    else
       @suffix = "_#{suffix}".gsub(/^.*_(?:development|test)/, '').gsub(/^__+/,'_')
     end
 
-    if suffix != cur_suffix
+    if suffix != cur_suffix || force
       puts_suffix("old suffix")
       self.cur_suffix = suffix
       puts_suffix("new suffix")
       puts
       verify_database(suffix) unless suffix.empty?
 
-      #link("REGION", suffix)
+      link("REGION", "#{ver_path}/REGION#{suffix}", false) # only needed for 54, 55
       # MiqServer.first.guid
       # suffix=`git config branch.$(git symbolic-ref -q --short HEAD).suffix`.chomp
       # File.write("GUID#{suffix}", MiqServer.first.guid)
-      link("GUID", ".ver/GUID#{suffix}")
+      link("GUID", "#{ver_path}/GUID#{suffix}")
       Dir.chdir("certs") do
-        link("v2_key", "../.ver/v2_key#{suffix}") || begin
+        link("v2_key", "#{ver_path}/v2_key#{suffix}") || begin
           #puts "falling back to development encryption key"
-          link("v2_key", "../.ver/v2_key.dev")
+          link("v2_key", "#{ver_path}/v2_key.dev")
         end
       end
     else
@@ -49,13 +55,14 @@ class GitDb
     end
   end
 
-  def link(base, specific)
+  def link(base, specific, keep_if_missing = true)
     if File.exist?(specific)
-      puts "#{specific} : #{File.read(specific).split("\n").first}"
+      puts "#{specific.split("ver/").last} : #{File.read(specific).split("\n").first}"
       File.delete(base) if File.exist?(base) || File.symlink?(base)
       File.symlink(specific, base)
       true
     else
+      File.delete(base) if File.exist?(base) && !keep_if_missing
       # determine specific?
       puts "no #{File.basename(specific)}"
       false
@@ -70,7 +77,7 @@ class GitDb
   def verify_database(suffix)
     db = `psql -l`.chomp.split("\n").map { |x| x.split("|").first.strip }.detect { |x| x =~ /_development#{suffix}$/ }
     if db
-      puts "#{db}"
+      puts "database: #{db}"
     else
       puts "no *_development#{suffix}"
     end
@@ -79,6 +86,13 @@ class GitDb
   def puts_suffix(message)
     cs = cur_suffix
     puts "#{message}: #{cs ? "'#{cs}'" : "NONE"}"
+  end
+
+  # note, since Dir.pwd may change, final answer
+  def ver_path(ref = ".")
+    @ver_dir ||= Pathname.new(git("rev-parse --show-toplevel") + "/.ver")
+    ref = File.expand_path(ref, Dir.pwd)
+    @ver_dir.relative_path_from(Pathname.new(ref)).to_s
   end
 
   def cur_suffix
@@ -92,8 +106,6 @@ class GitDb
       git("config branch.#{branchname}.suffix #{suffix}")
     end
   end
-
-`git config branch.$(git symbolic-ref -q --short HEAD).suffix`
 
   def cur_branch
     git("symbolic-ref -q --short HEAD")

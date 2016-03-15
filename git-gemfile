@@ -1,4 +1,7 @@
 # touch a gemfile, so the gemfile lock will be pegged to this file
-touch Gemfile.lock.$(git branch-name)
+branch="$(git symbolic-ref -q --short HEAD)"
+ver_dir="$(git rev-parse --show-toplevel)/.ver"
+
+touch ${ver_dir}/Gemfile.lock.${branch}
 git checkout HEAD
 bundle
