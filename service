@@ -91,10 +91,10 @@ when "start", "load"
   alter_service("load", agent_names.first)
 when "stop", "unload"
   alter_service("unload", agent_names.first)
-#when "restart", "reload"
-  # stop
-  # ensure ps aux says it isn't running?
-  # start
+# when "restart", "reload"
+#   alter_service("load", agent_names.first)
+#   # ensure ps aux says it isn't running?
+#   alter_service("unload", agent_names.first)
 #when "dir"
   # grep the directory from the xml file
   # can we cd into the directory for the user
