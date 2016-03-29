@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# up enables, down disables
+mode=${1-down} 
+sudo ifconfig awdl0 ${mode}
