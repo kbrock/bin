@@ -24,7 +24,7 @@ class GitDb
     if suffix == "-X" || suffix.empty?
       @suffix = ''
     elsif suffix == "-b"
-      @suffix = "_#{branchname}"
+      @suffix = "_#{branchname.gsub(".","_")}"
     elsif suffix == "-f"
       @suffix = cur_suffix
       force = true
