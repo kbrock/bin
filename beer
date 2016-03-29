@@ -29,6 +29,9 @@ class Beer
     #   cmd = "ruby -I test"
     elsif cmd =~ /^(cop|rubocop|rubo)$/
       @cmd = "rubocop"
+    elsif (cmd == "migrate" || cmd == "db:migrate") && args.empty?
+      @args = %w(db:migrate db:schema:dump db:test:prepare)
+      @cmd = "rake"
     elsif cmd =~ %r{:[a-z]|-T}
       args.unshift cmd
       @cmd = "rake"
