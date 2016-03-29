@@ -20,12 +20,14 @@
 # git hub-url origin a/b/c.rb
 #    http://github.com/kbrock/manageiq/blob/migrate_miq_groups/a/b/c.rb
 
+require "uri"
+
 class GitUrl
   attr_accessor :remote, :branch, :mode, :params
 
   def run(_env, argv)
     parse_args(argv)
-    puts "#{base_url}/#{mode}/#{branch}#{params}"
+    puts URI.escape("#{base_url}/#{mode}/#{branch}#{params}")
   end
 
   def parse_args(argv)
@@ -60,7 +62,7 @@ class GitUrl
         mode ||= "compare"
       elsif params =~ /\./
         # expand the file and normalize to root git?
-        params = params.gsub(/:([0-9]+)/) { "#L#{$1}" }
+        params = params.gsub(/:([0-9]+)$/) { "#L#{$1}" }
         params = "/#{params}"
         mode ||= "blob"
       else
