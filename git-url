@@ -27,11 +27,20 @@ class GitUrl
 
   def run(_env, argv)
     parse_args(argv)
-    puts URI.escape("#{base_url}/#{mode}/#{branch}#{params}")
+    puts "#{base_url}/#{mode}/#{branch}#{params}"
   end
 
   def parse_args(argv)
     @remote, @branch, @mode, @params = extract_args(*argv)
+
+    # uri escape, but don't escape the #, we want that
+    if @params.nil?
+    elsif @params.include?("#")
+      parts = @params.split("#")
+      @params = "#{URI.escape(parts[0])}##{parts[1]}"
+    else
+      @params = URI.escape(@params)
+    end
   end
 
   def extract_args(remote = nil, mode = nil, params = nil)
