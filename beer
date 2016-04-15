@@ -49,7 +49,7 @@ class Beer
     elsif File.exists?(fn)
       [fn, line].join
     elsif !fn.include?('/')
-      Dir.glob("**/#{fn}").select { |y| y.to_s !~ /factories|work/ }.map { |ref| "#{ref.to_s}#{line}" }
+      Dir.glob("**/#{fn}").select { |y| y.to_s !~ /factories\// }.map { |ref| "#{ref.to_s}#{line}" }
     else
       []
     end
