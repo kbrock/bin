@@ -42,7 +42,8 @@ class Beer
     self
   end
 
-  def track_down(fn, line = nil) 
+  def track_down(fn, lp = ':')
+    fn, line = f_l(fn, lp)
     if !fn
       []
     elsif File.exists?(fn)
@@ -75,8 +76,7 @@ class Beer
         next(x) if x.start_with?("-")
         x = x.sub("migrate", "migrations").gsub(%r{(?:./)?(?:app|db)/(.*).rb}) { "spec/#{$1}_spec.rb" }
 
-        _, fn, line = x.match(/^(.*_spec.rb)(:[0-9]+)?$/).to_a
-        optionally_quote track_down(fn, line)
+        optionally_quote track_down(x)
       end
 #    elsif cmd == "test"
 #      @args = %w(-I test) + args.map { |x| x }
@@ -85,6 +85,15 @@ class Beer
     end
     @args = @args.uniq
     self
+  end
+
+  def f_l(fn, lp = ':')
+    if fn =~ /:[0-9]+$/
+      _, fn, line = fn.match(/^(.*)(:[0-9]+)$/).to_a
+      [fn, line.sub(':', lp)]
+    else
+      [fn, nil]
+    end
   end
 
   def cmd_line
