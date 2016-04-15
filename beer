@@ -82,6 +82,9 @@ class Beer
 #      @args = %w(-I test) + args.map { |x| x }
     elsif cmd == "rubocop"
       @args = args.flat_map { |x| track_down(x) }
+    elsif cmd == "open"
+      @args = args.flat_map { |x| track_down(x, '#L') }
+                  .flat_map { |f| `git url upstream/master "#{f}"`.strip }.compact
     end
     @args = @args.uniq
     self
