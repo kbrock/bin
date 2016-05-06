@@ -1,0 +1,71 @@
+#!/usr/bin/env ruby
+
+# not totally necessary
+require 'term/ansicolor'
+include Term::ANSIColor
+
+SHOW_TIMES = false
+# for ARGF to work, remove switches from ARGV
+
+    #             severity, dateTtime.ms                 #pid     :thread_id      severity      progname: msg
+COMMON=/^\[-*\] ([A-Z]), \[([-0-9]*)T([0-9:]*)\.([0-9]*) #([0-9]*):([a-z0-9]*)\] +([A-Z]{0,5}) -- ([^:]*): (.*)$/
+#FORMAT = "[----] %s, [%sT%s.%s#%d:%s] %5s -- %s: %s\n"
+#puts FORMAT % [s1, dt, tm, ms, pid, thd, sev, progname, msg]
+#puts "[----] #{s1}, [#{dt}T#{tm}.#{ms}##{pid}:#{thd}] #{sev} -- #{progname}: #{msg}"
+
+#{}"[-#{severity[0..0]}-] [#{format_datetime(time)} ##{threadid.to_s[-4..-1]}] #{progname[0..5]}: #{msg}\n"
+#[-D-] [16:50:04.768407 #1660] :   VmdbDatabaseLock Inst Including Associations (0.0ms - 0rows)
+
+#        severity       time      .ms       #thread_id :   progname: msg
+ MINE=/^\[-([A-Z])-\] \[([0-9:]*)\.([0-9]*) #([a-z0-9]*)\] ([^:]*): (.*)$/
+
+ARGF.each do |line|
+  s1, dt, tm, ms, pid, thd, sev, progname, msg = nil
+  if (md = COMMON.match(line))
+    s1, dt, tm, ms, pid, thd, sev, progname, msg = md.captures
+  elsif (md = MINE.match(line))
+    # sev, dt, pid = blank
+    s1, tm, ms, thd, progname, msg = md.captures
+  else
+    puts line
+    next
+  end
+
+# abbreviate input
+  msg.gsub!(/ManageIQ::Providers::Vmware::InfraManager/, 'Vmware')
+  msg.gsub!(/MiqEmsMetricsProcessorWorker::Runner/, 'EmsMetricsProcessor')
+  msg.gsub!(/(,?[ A-Za-z]*: \[\])/, '')
+  msg.gsub!(/(,? (PID|GUID):?[= ]\[[-a-z0-9]*\])/, '')
+
+  # this seems redundant to me
+  msg.gsub!(/,? (Timeout|Priority): \[[0-9]*\]/, '')  # the desired timeout is always the same
+  msg.gsub!(/,? (Zone): \[[A-Za-z]*\]/, '') # it is always "my zone"
+
+# timeouts
+  # Timed Out .... after X seconds
+  # timedout after X seconds
+  msg.gsub!(/(timed out)/i) { "#{red}#{$1}#{reset}" }
+  msg.gsub!(/(?<=after )([0-9.]* seconds)/) { "#{red}#{$1}#{reset}" }
+  msg.gsub!(/(?<=\[)(timeout)(?=\])/) { "#{red}#{$1}#{reset}" }
+# times
+  msg.gsub!(/(?<=\()([0-9.]*ms)(?=\))/) { "#{green}#{$1}#{reset}" }
+  msg.gsub!(/(?<=\()([0-9.]*ms - [0-9]*rows)(?=\))/) { "#{green}#{$1}#{reset}" }
+  msg.gsub!(/(?<=:total_time=>)([0-9.]*)/) { "#{green}#{$1}#{reset}" }
+
+  msg.gsub!(/(?<=\[)([0-9.]*)(?=\] seconds)/) { "#{green}#{$1}#{reset}" }
+  msg.gsub!(/(?<=CPU Time \[)([0-9.]*)(?=\])/) { "#{green}#{$1}#{reset}" }
+
+# commands
+  msg.sub!(/(?<=MIQ\()([^\)]*)(?=\))/) { "#{blue}#{$1}#{reset}" } # only highlight FIRST MIQ on line
+  msg.gsub!(/(SELECT|INSERT|DELETE|UPDATE|BEGIN|COMMIT|ROLLBACK)/) { "#{blue}#{$1}#{reset}" }
+  msg.sub!(/(?<=Command: \[)([^\]]*)(?=\])/) { "#{blue}#{$1}#{reset}" }
+
+# truncate sql
+  trim_msg = msg =~ /SELECT|INSERT|UPDATE/ ? msg[0..200] : msg
+  sec = tm.split(":").last
+  if SHOW_TIMES
+    puts "[-#{bold}#{s1}#{reset}-] [#{sec}.#{ms[0..1]}] - #{trim_msg}"
+  else
+    puts "[-#{bold}#{s1}#{reset}-] - #{trim_msg}"
+  end
+end
