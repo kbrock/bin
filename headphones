@@ -15,6 +15,8 @@ require 'optparse'
 class Headphones
   attr_accessor :verbose
   attr_accessor :target
+  # list all targets
+  attr_accessor :list
 
   # @param mode [:input, :output] which sound source
   # @param name [Regexp|String] name of the device to match
@@ -32,7 +34,8 @@ class Headphones
 
   def parse(args)
     OptionParser.new do |opt|
-      opt.banner = "Usage: aab [-n #] [-c #] [-h host] [-t token] [-apple] [-google]"
+      opt.banner = "Usage: headphones target"
+      opt.on('-l', '--list', "List all devices") { |x| @list = x }
       opt.on('-v', '--verbose', "Verbose")  { |v| @verbose = v }
       opt.parse!(args)
     end
@@ -59,8 +62,10 @@ class Headphones
 
   def run
     current(:output)
-    set_source(:input, target)
+
+    sources(:output).each { |t| puts "  #{t}" } and return if list
     set_source(:output, target)
+    set_source(:input, target)
   end
 
   def self.run(args)
