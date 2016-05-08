@@ -49,5 +49,5 @@ git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/heads/ |
 
 #  echo "k=${k}"
 #  git --no-pager log -1 --pretty=format:"%Cgreen%ci %Cblue%cr%x09%C(auto)%D%Creset%n" $k
-  git --no-pager log -1 --pretty=format:"${c}%ci %Creset%Cblue%<(15)%cr%Creset%C(auto)%D%Creset%n" $k
+  git --no-pager log -1 --pretty=format:"${c}%ci %Creset%Cblue%<(15)%cr%Creset%C(auto)%D%Creset%n" $k --
 done
