@@ -28,7 +28,7 @@ class Headphones
   # Logitech USB Headset (input)
   # ==> "Logitech USB Headset"
   def find_source(mode, name)
-    name = Regexp.new(name)
+    name = Regexp.new(name, Regexp::IGNORECASE)
     sources(mode).select { |n| n =~ name }.first.sub(/ \([a-z]+\)$/,'')
   end
 
@@ -40,7 +40,10 @@ class Headphones
       opt.parse!(args)
     end
 
+    # assume we're enabling the Logitech headphones
     @target = args[0] || "Logitech"
+    # headphone jack ==> built in
+    @target = "Built-in" if args[0].to_s =~ /jack/i
     self
   end
 
