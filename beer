@@ -31,6 +31,9 @@ class Beer
     #   cmd = "ruby -I test"
     elsif cmd =~ /^(cop|rubocop|rubo)$/
       @cmd = "rubocop"
+    elsif (cmd == "create" || cmd == "db:create") && args.empty?
+      @args = %w(db:create db:migrate db:seed db:schema:dump db:test:prepare) + @args
+      @cmd = "rake"
     elsif (cmd == "migrate" || cmd == "db:migrate") && args.empty?
       @args = %w(db:migrate db:schema:dump db:test:prepare) + @args
       @cmd = "rake"
