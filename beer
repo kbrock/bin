@@ -24,6 +24,7 @@ class Beer
     elsif cmd =~ /^(s|c|db|g|r|generate|server|console|dbconsole|runner)$/
       ENV["ERB_IN_CONFIG"]="true"
       ENV["SKIP_PRIMORDIAL_SEED"]="false"
+      ENV["RACK_MINI_PROFILER_PATCH"]="notifications"
       @args.unshift cmd
       @cmd = "rails"
     # elsif cmd =~ %r{^test/}
