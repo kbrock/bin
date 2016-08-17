@@ -4,6 +4,18 @@
 # test/* => bundle exec ruby -Itest
 # spec/* => bundle exec rspec (or ruby?)
 
+# examples:
+# beer spec/models/user_spec.rb
+# beer user_spec.rb
+# beer user_spec.rb:123
+# beer app/models/user.rb
+# beer db:migrate # rake db:migrate
+# beer s # rails s
+# beer -T precompile
+# beer cop user.rb
+# beer head # rspec all modified local files
+# beer master # rspec all files that are different from master
+
 STDOUT.sync = true
 
 class Beer
