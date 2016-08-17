@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 
+# examples:
+
+# gpo origin # pushes to origin. if it is the first use, then track origin
+# gpo # pushes to the tracked branch, usally origin/HEAD
+
+
 # push current branch (HEAD) to the origin
 #alias gpo="git push origin HEAD"
 # function doesn't assume origin, uses remote that this branch is tracking
