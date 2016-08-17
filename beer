@@ -97,8 +97,8 @@ class Beer
   end
 
   def f_l(fn, lp = ':')
-    if fn =~ /:[0-9]+$/
-      _, fn, line = fn.match(/^(.*)(:[0-9]+)$/).to_a
+    if fn =~ /[\[\]:0-9]+$/
+      _, fn, line = fn.match(/^(.*?)([:\[\]0-9]+)$/).to_a
       [fn, line.sub(':', lp)]
     else
       [fn, nil]
