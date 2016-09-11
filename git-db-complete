@@ -1,0 +1,18 @@
+#!/usr/bin/env ruby
+# hook this up using:
+#
+# function _git_db { __gitcomp "$(git-db-complete $cur)" ; }
+
+orig_suffix = ARGV[0] || exit
+
+suffix = "_#{orig_suffix}".gsub(/^.*_(?:development|test)/, '').gsub(/^__+/,'_')
+suffix = "_development#{suffix}"
+databases = `psql -l`.chomp.split("\n").map { |x| x.split("|").first.strip }
+
+suggestions = databases.select { |x| x =~ /#{suffix}/ }.map {|x| x.gsub(/^.*#{suffix}/, orig_suffix) }
+
+# typically, would just remove the _development stuff
+# instead, tacking on the user's specified prefix
+
+suggestions = suggestions
+puts suggestions
