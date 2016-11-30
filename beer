@@ -25,6 +25,10 @@ class Beer
     @args = args
   end
 
+  def tweak
+    tweak_cmd.tweak_args.tweak_env
+  end
+
   def tweak_cmd
     @cmd ||= "rake"
     if cmd == "gn" || cmd == "master"
@@ -35,8 +39,9 @@ class Beer
       @args = `git diff HEAD --name-only`.chomp.split("\n")
     elsif cmd =~ /^(s|c|db|g|r|generate|server|console|dbconsole|runner)$/
       ENV["ERB_IN_CONFIG"]="true"
-      ENV["SKIP_PRIMORDIAL_SEED"]="false"
+      ENV["SKIP_PRIMORDIAL_SEED"]="true"
       ENV["RACK_MINI_PROFILER_PATCH"]="notifications"
+      ENV["RAILS_SERVE_STATIC_FILES"]="true"
       @args.unshift cmd
       @cmd = "rails"
     # elsif cmd =~ %r{^test/}
@@ -58,6 +63,13 @@ class Beer
       args.unshift cmd
       @cmd = "rspec" # ruby -I rspec
     end
+
+    self
+  end
+
+  def tweak_env
+    ENV["RAILS_ENV"]="test" if @cmd == "rspec"
+
     self
   end
 
@@ -136,7 +148,7 @@ class Beer
   end
 
   def self.run(args = ARGV)
-    new(args).tweak_cmd.tweak_args.print.run
+    new(args).tweak.print.run
   end
 end
 
