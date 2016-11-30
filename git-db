@@ -33,9 +33,8 @@ class GitDb
     end
 
     if suffix != cur_suffix || force
-      puts_suffix("old suffix")
+      puts "suffix #{cur_suffix || "NONE"} => #{suffix}"
       self.cur_suffix = suffix
-      puts_suffix("new suffix")
       puts
       verify_database(suffix) unless suffix.empty?
 
@@ -55,6 +54,7 @@ class GitDb
     end
   end
 
+  # @param [Boolean] keep_if_missing false if the file should be deleted (default true)
   def link(base, specific, keep_if_missing = true)
     if File.exist?(specific)
       puts "#{specific.split("ver/").last} : #{File.read(specific).split("\n").first}"
@@ -64,7 +64,7 @@ class GitDb
     else
       File.delete(base) if File.exist?(base) && !keep_if_missing
       # determine specific?
-      puts "no #{File.basename(specific)}"
+      puts "no  #{File.basename(specific)}"
       false
     end
   end
@@ -77,9 +77,9 @@ class GitDb
   def verify_database(suffix)
     db = `psql -l`.chomp.split("\n").map { |x| x.split("|").first.strip }.detect { |x| x =~ /_development#{suffix}$/ }
     if db
-      puts "database: #{db}"
+      puts "yes database: #{db}"
     else
-      puts "no *_development#{suffix}"
+      puts "no  database (*_development#{suffix})"
     end
   end
 
