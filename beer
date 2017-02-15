@@ -31,7 +31,8 @@ class Beer
 
   def tweak_cmd
     @cmd ||= "rake"
-    if cmd == "gn" || cmd == "master"
+    if cmd == "rake" || cmd == "ruby"
+    elsif cmd == "gn" || cmd == "master"
       @cmd = "rspec"
       @args = `git diff upstream/master... --name-only`.chomp.split("\n")
     elsif cmd == "head"
@@ -41,6 +42,7 @@ class Beer
       ENV["ERB_IN_CONFIG"]="true"
       ENV["SKIP_PRIMORDIAL_SEED"]="true"
       ENV["RACK_MINI_PROFILER_PATCH"]="notifications"
+      #ENV["MIQ_PERF"]="true"
       ENV["RAILS_SERVE_STATIC_FILES"]="true"
       @args.unshift cmd
       @cmd = "rails"
@@ -56,12 +58,16 @@ class Beer
     elsif (cmd == "migrate" || cmd == "db:migrate") && args.empty?
       @args = %w(db:migrate db:schema:dump db:test:prepare) + @args
       @cmd = "rake"
+    # elsif cmd == "assets"
+    #   bundle, bower, evm:assets:compile
     elsif cmd =~ %r{:[a-z]|-T}
       args.unshift cmd
       @cmd = "rake"
     elsif cmd =~ %r{(:?[^r]|^)(spec|app|db|lib)/} || cmd =~ /_spec.rb/
       args.unshift cmd
       @cmd = "rspec" # ruby -I rspec
+    elsif cmd == "spec"
+      @cmd = "rspec"
     end
 
     self
@@ -114,7 +120,7 @@ class Beer
     elsif cmd == "rubocop"
       @args = args.flat_map { |x| track_down(x) }
     elsif cmd == "open"
-      @args = args.flat_map { |x| track_down(x, '#L') }
+      @args = args.flat_map { |x| track_down(x, '#L') } \
                   .flat_map { |f| `git url upstream/master "#{f}"`.strip }.compact
     end
     @args = @args.uniq
