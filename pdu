@@ -4,29 +4,46 @@
 #   main: https://wiki.postgresql.org/wiki/Disk_Usage
 #   alt:  http://www.postgresql.org/docs/9.0/static/disk-usage.html
 function usage() {
-  echo "usage: $(basename $0) [-h] [-v] [-l limit] [dbname]" >&2
+  echo "usage: $(basename $0) [-h] [-v] [-l limit] [-r] [dbname]" >&2
   echo "    shows disk usage for a database or all databases" >&2
   echo "    -h shows this help message"
   echo "    -v vacuums the db first"
   echo "    -l limits the results (default: 20)"
+  echo "    -r order by row count (default: size)"
+  echo "    -i include indexes (default: false)"
+  echo "    -c show commas"
+  echo "    -f show full info on tables"
   exit 1
 }
 
 # defaulting limit to 20
 limit=20
+order="pg_relation_size(C.oid) DESC" # column 2 = disk usage
+relkind="AND relkind = 'r'" # limit to tables only (by default)
 
-while getopts "vhl:" opt ; do
+while getopts "cfhil:rv" opt ; do
   case $opt in
+    c) commas="\pset numericlocale" ;;
     h) usage ; exit 1 ;;
-    v) vacuum='vacuum full;' ;;
+    i) relkind="" ;;
     l) limit=$OPTARG ;;
+    r) order="reltuples DESC" ;;
+    v) vacuum='vacuum full;' ;;
+    f) full="true" ;;
     \?) echo "Invalid option: -$OPTARG" >&2 ;;
   esac
 done
 shift $((OPTIND-1))
 
 dbname="$1"
-tablename="$2"
+
+if [ $# -gt 1 ] ; then # has tablename
+  # overloading relkind - sorry
+  # SORRY, very rails specific, may like next line better
+  # relkind="${relkind} AND (relname = '${2}' OR relname like 'index_${2}%')"
+  relkind="${relkind} AND relname like '%${2}%'"
+  #order="${order}, relname"
+fi
 
 # which database is the biggest
 if [ -z "${dbname}" ] ; then
@@ -44,19 +61,38 @@ if [ -z "${dbname}" ] ; then
         END DESC -- nulls first
       LIMIT ${limit};
 SQL
-else # which table objects are the biggest?
+elif [ -n "${full}" ] ; then
+  # full display, not just objects
   psql "${dbname}" << SQL
+  ${commas}
   ${vacuum}
   SELECT
-      CASE WHEN nspname = 'public'
-        THEN relname
-        ELSE nspname || '.' || relname
-      END AS "relation",
-          pg_size_pretty(pg_relation_size(C.oid)) AS "size"
-    FROM  pg_class C
-          LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
+          CASE WHEN nspname = 'public' THEN relname ELSE nspname || '.' || relname END AS "relation",
+          reltuples::integer as "rows",
+          pg_size_pretty(pg_total_relation_size(c.oid)) AS total,
+          pg_size_pretty(pg_indexes_size(c.oid)) AS index,
+          pg_size_pretty(pg_total_relation_size(reltoastrelid)) AS toast,
+          pg_size_pretty(pg_relation_size(c.oid)) AS table
+    FROM  pg_class c
+     LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE nspname NOT IN ('pg_catalog', 'information_schema')
-    ORDER BY pg_relation_size(C.oid) DESC
+    AND relkind = 'r'
+    ORDER BY ${order}
+    LIMIT ${limit};
+SQL
+else # which table objects are the biggest?
+  psql "${dbname}" << SQL
+  ${commas}
+  ${vacuum}
+  SELECT
+          CASE WHEN nspname = 'public' THEN relname ELSE nspname || '.' || relname END AS "relation",
+          reltuples::integer as "rows",
+          pg_size_pretty(pg_relation_size(c.oid)) AS "size"
+    FROM  pg_class c
+     LEFT JOIN pg_namespace n ON (n.oid = c.relnamespace)
+    WHERE nspname NOT IN ('pg_catalog', 'information_schema')
+    ${relkind}
+    ORDER BY ${order}
     LIMIT ${limit};
 SQL
 fi
