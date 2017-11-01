@@ -1,13 +1,21 @@
 #!/usr/bin/env ruby
 
-# not totally necessary
-require 'term/ansicolor'
-include Term::ANSIColor
+#require 'term/ansicolor'
+#include Term::ANSIColor
+red="\e[31m"
+blue="\e[34m"
+green="\e[32m"
+bold="\e[1m"
+magenta="\e[35m"
+reset="\e[0m"
 
-SHOW_TIMES = false
+
+SHOW_PID = true
+SHOW_DATE_TIMES = false
+SHOW_TIMES = true
 # for ARGF to work, remove switches from ARGV
 
-    #             severity, dateTtime.ms                 #pid     :thread_id      severity      progname: msg
+#               severity, dateTtime.ms                 #pid     :thread_id      severity      progname: msg
 COMMON=/^\[-*\] ([A-Z]), \[([-0-9]*)T([0-9:]*)\.([0-9]*) #([0-9]*):([a-z0-9]*)\] +([A-Z]{0,5}) -- ([^:]*): (.*)$/
 #FORMAT = "[----] %s, [%sT%s.%s#%d:%s] %5s -- %s: %s\n"
 #puts FORMAT % [s1, dt, tm, ms, pid, thd, sev, progname, msg]
@@ -16,16 +24,10 @@ COMMON=/^\[-*\] ([A-Z]), \[([-0-9]*)T([0-9:]*)\.([0-9]*) #([0-9]*):([a-z0-9]*)\]
 #{}"[-#{severity[0..0]}-] [#{format_datetime(time)} ##{threadid.to_s[-4..-1]}] #{progname[0..5]}: #{msg}\n"
 #[-D-] [16:50:04.768407 #1660] :   VmdbDatabaseLock Inst Including Associations (0.0ms - 0rows)
 
-#        severity       time      .ms       #thread_id :   progname: msg
- MINE=/^\[-([A-Z])-\] \[([0-9:]*)\.([0-9]*) #([a-z0-9]*)\] ([^:]*): (.*)$/
-
 ARGF.each do |line|
   s1, dt, tm, ms, pid, thd, sev, progname, msg = nil
   if (md = COMMON.match(line))
     s1, dt, tm, ms, pid, thd, sev, progname, msg = md.captures
-  elsif (md = MINE.match(line))
-    # sev, dt, pid = blank
-    s1, tm, ms, thd, progname, msg = md.captures
   else
     puts line
     next
@@ -39,7 +41,14 @@ ARGF.each do |line|
 
   # this seems redundant to me
   msg.gsub!(/,? (Timeout|Priority): \[[0-9]*\]/, '')  # the desired timeout is always the same
-  msg.gsub!(/,? (Zone): \[[A-Za-z]*\]/, '') # it is always "my zone"
+  msg.gsub!(/,? (Zone): \[[A-Z a-z0-9_]*\]/, '') # it is always "my zone"
+
+#  msg.gsub!(/,? (Message id): \[[0-9]*\]/, '') # not relevant
+  msg.gsub!(/,? (Role): \[[A-Z a-z_]*\]/, '') # temporary
+  msg.gsub!(/,? (State): \[ready\]/, '') # not relevant
+  msg.gsub!(/,? (Ident): \[[A-Z a-z0-9_]*\]/, '') # temporary
+  msg.gsub!(/ManageIQ::Providers::/, '') # temporary
+  msg.gsub!(/UTC/, '') # temporary
 
 # timeouts
   # Timed Out .... after X seconds
@@ -60,11 +69,24 @@ ARGF.each do |line|
   msg.gsub!(/(SELECT|INSERT|DELETE|UPDATE|BEGIN|COMMIT|ROLLBACK)/) { "#{blue}#{$1}#{reset}" }
   msg.sub!(/(?<=Command: \[)([^\]]*)(?=\])/) { "#{blue}#{$1}#{reset}" }
 
+# memory
+  msg.gsub!(/(?<=PSS: \[)([0-9.]*)(?=\])/) { "#{magenta}#{$1}#{reset}" }
+  msg.gsub!(/(?<=RSS: \[)([0-9.]*)(?=\])/) { "#{magenta}#{$1}#{reset}" }
+  msg.gsub!(/(?<=Live Objects: \[)([0-9.]*)(?=\])/) { "#{magenta}#{$1}#{reset}" }
+  msg.gsub!(/(?<=Old Objects: \[)([0-9.]*)(?=\])/) { "#{magenta}#{$1}#{reset}" }
+
 # truncate sql
   trim_msg = msg =~ /SELECT|INSERT|UPDATE/ ? msg[0..200] : msg
-  sec = tm.split(":").last
-  if SHOW_TIMES
-    puts "[-#{bold}#{s1}#{reset}-] [#{sec}.#{ms[0..1]}] - #{trim_msg}"
+  ts = tm.split(":")
+  hour = ts[-3]
+  min = ts[-2]
+  sec = ts.last
+  if SHOW_PID
+    puts "[-#{pid}-] [#{hour}:#{min}:#{sec}.#{ms[0..1]}] - #{trim_msg}"
+  elsif SHOW_DATE_TIMES
+    puts "[-#{bold}#{s1}#{reset}-] [#{dt}T#{tm}] - #{trim_msg}"    
+  elsif SHOW_TIMES
+    puts "[-#{bold}#{s1}#{reset}-] [#{min}:#{sec}.#{ms[0..1]}] - #{trim_msg}"
   else
     puts "[-#{bold}#{s1}#{reset}-] - #{trim_msg}"
   end

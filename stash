@@ -45,8 +45,13 @@ class Stash
     end
   end
 
-  def head(*)
-    list.split("\n")[0..10].join("\n")
+  def head(count = 10)
+    if count.kind_of?(String)
+      count = count.to_i
+      count = -count if count < 0
+    end
+    count ||= 10
+    list.split("\n")[0...count].join("\n")
   end
 
   def list(*)

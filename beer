@@ -41,9 +41,10 @@ class Beer
     elsif cmd =~ /^(s|c|db|g|r|generate|server|console|dbconsole|runner)$/
       ENV["ERB_IN_CONFIG"]="true"
       ENV["SKIP_PRIMORDIAL_SEED"]="true"
-      ENV["RACK_MINI_PROFILER_PATCH"]="notifications"
-      #ENV["MIQ_PERF"]="true"
+      #ENV["SKIP_SEEDING"]="true"
+      ENV["RACK_MINI_PROFILER_PATCH"]="notifications" # miq_perf
       ENV["RAILS_SERVE_STATIC_FILES"]="true"
+      ENV["DEBUG_ASSETS"]="true" # development.rb
       @args.unshift cmd
       @cmd = "rails"
     # elsif cmd =~ %r{^test/}
@@ -51,6 +52,10 @@ class Beer
     #   cmd = "ruby -I test"
     elsif cmd =~ /^(cop|rubocop|rubo)$/
       @cmd = "rubocop"
+    elsif cmd == "update"
+      ENV["SKIP_TEST_RESET"]="1"
+      ENV["SKIP_AUTOMATE_RESET"]="1"
+      exec("./bin/update")
     elsif (cmd == "create" || cmd == "db:create") && args.empty?
       ENV["GOOD_MIGRATIONS"]="skip"
       @args = %w(db:create db:migrate db:seed db:schema:dump db:test:prepare) + @args
