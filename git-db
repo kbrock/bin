@@ -38,7 +38,7 @@ class GitDb
       puts
       verify_database(suffix) unless suffix.empty?
 
-      link("REGION", "#{ver_path}/REGION#{suffix}", false) # only needed for 54, 55
+      #link("REGION", "#{ver_path}/REGION#{suffix}", false) # only needed for 54, 55
       # MiqServer.first.guid
       # suffix=`git config branch.$(git symbolic-ref -q --short HEAD).suffix`.chomp
       # File.write("GUID#{suffix}", MiqServer.first.guid)
