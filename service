@@ -1,23 +1,180 @@
 #!/usr/bin/env ruby
 
-def agent_dir
-  "#{ENV['HOME']}/Library/LaunchAgents"
+require 'optparse'
+
+# Stateless part that knows how to get stuff done
+class Agent
+  STATIC_AGENTS = %w(artemis graphite postgres)
+  attr_accessor :docker
+
+  def agent_dir
+    "#{ENV['HOME']}/Library/LaunchAgents"
+  end
+
+  # names of installed services
+  def get_agent_names(partial)
+    Dir["#{agent_dir}/*#{partial}*.plist"] + STATIC_AGENTS.select { |sa| sa =~ /#{partial}/ }
+  end
+
+  # names of uninstalled homebrew services
+  def get_plist_options(partial)
+    Dir["/usr/local/opt/*#{partial}*/*.plist"]
+  end
+
+  def install(agent_file_name)
+    if File.exist?(agent_file_name)
+      puts "installing #{agent_file_name.split("/").last}"
+      puts "cp #{agent_file_name} #{agent_dir}/"
+      `cp #{agent_file_name} #{agent_dir}/`
+    end
+  end
+
+  def start(service_name)
+    if service_name =~ /artemis/ && docker
+      start_artemis_docker
+    elsif service_name =~ /postgres/ && docker
+      start_postgres_docker
+    elsif service_name =~ /graphite/ && docker
+      start_graphite_docker
+    else
+      alter_service("load", service_name)
+    end
+  end
+
+  def stop(service_name)
+    if docker
+      svc_parts = service_name.split(".")
+      service_name = svc_parts[-2] || service_name
+      stop_docker(service_name)
+    else
+      alter_service("unload", service_name)
+    end
+  end
+
+  def stop_docker(service_name)
+    puts "sn = #{service_name}"
+    `docker kill $(docker ps | awk '/#{service_name}/ { print $1 }')`
+  end
+
+  # TODO get_global_agent_names
+  # /Library/LaunchAgents /Library/LaunchDaemons
+  # TODO get brew list names?
+  def alter_service(action, service_name)
+    system("launchctl #{action} -w #{service_name}").tap { |status| puts "issue" unless status }
+  end
+
+  def start_postgres_docker
+    `docker run -p 5432:5432 \
+               -d --rm -e POSTGRES_PASSWORD=postgres \
+               -e LANG=en_US.UTF-8 \
+               -v /usr/local/var/postgres:/var/lib/postgresql/data --name postgres-vmdb postgres:9.5
+    `
+    sleep 1
+    puts "tailing start logs"
+    puts "docker logs -f postgres-vmdb"
+    `docker logs -f postgres-vmdb`
+  end
+
+  def start_artemis_docker
+    # -p 5672:5672 -p 61613:61613 -p 61616:61616
+    `docker run -d -p 61616:61616 --name artemis \
+                -e ARTEMIS_USERNAME=admin \
+                -e ARTEMIS_PASSWORD=smartvm \
+                vromero/activemq-artemis
+    `
+  end
+
+  def start_graphite_docker
+    `docker run -d \
+            --name graphite \
+            --restart=always \
+            -p 80:80 \
+            -p 2003-2004:2003-2004 \
+            -p 2023-2024:2023-2024 \
+            -p 8125:8125/udp \
+            -p 8126:8126 \
+            graphiteapp/graphite-statsd`
+  end
 end
 
-def get_agent_names(partial)
-  Dir["#{agent_dir}/*#{partial}*.plist"]
-end
+# the user's intent
+class Cmd
+  ACTIONS=%w(list start load stop unload fix vi edit subl install status)
 
-def get_plist_options(partial)
-  Dir["/usr/local/opt/*#{partial}*/*.plist"]
-end
+  attr_accessor :agent, :docker, :action, :agent_search
 
-# TODO get_global_agent_names
-# /Library/LaunchAgents /Library/LaunchDaemons
-# TODO get brew list names?
-def alter_service(action, service_plist)
-  status=system("launchctl #{action} -w #{service_plist}")
-  puts "issue" unless status
+  def initialize(options)
+    options.each_pair do |n, v|
+      public_send("#{n}=", v)
+    end
+    # require 'byebug'
+    # byebug
+  end
+
+  def install?
+    @action == "install"
+  end
+
+  def agent
+    @agent ||= Agent.new.tap { |a| a.docker = true if @docker }
+  end
+
+  def previous_install
+    if !(previous=agent.get_agent_names(agent_search)).empty?
+      previous.first.split("/").last
+    end
+  end
+
+  def can_install?
+    File.exist?(agent_search)
+  end
+
+  # uninstalled services (plists that are in /usr/local/ )
+  def agent_options
+    agent.get_plist_options(agent_search)
+  end
+
+  # installed services (plists)
+  def agent_names
+    @agent_names ||= agent.get_agent_names(agent_search)
+  end
+
+  def short_agent_names
+    agent_names.map { |an| an.split("/").last }
+  end
+
+  def length
+    agent_names.length
+  end
+
+  def agent_name
+    agent_names.first
+  end
+
+  def short_agent_name
+    short_agent_names.first
+  end
+
+  def self.parse(args = ARGV)
+    options = {}
+
+    OptionParser.new do |opt|
+      opt.on('-d', '--docker',  "Run for docker process")  { |v| options[:docker] = v }
+      opt.parse!(args)
+    end
+
+    if ACTIONS.include?(args[1])
+      options[:action]=args[1]
+      options[:agent_search]=args[0] || "*"
+    elsif ACTIONS.include?(args[0])
+      options[:action]=args[0]
+      options[:agent_search]=args[1] || "*"
+    else
+      puts "usage: service service_name [help|list|start|stop|vi|fix|install|status]"
+      exit 1
+    end
+    new(options)
+  end
 end
 
 #TODO add apache suport:
@@ -33,92 +190,77 @@ end
 # echo "apachectl $mode"
 # sudo apachectl $mode
 
-ACTIONS=%w(list start load stop unload fix vi edit subl install status)
+cmd = Cmd.parse(ARGV)
 
-if ACTIONS.include?(ARGV[1])
-  action=ARGV[1]
-  agent_search=ARGV[0]||"*"
-elsif ACTIONS.include?(ARGV[0])
-  action=ARGV[0]
-  agent_search=ARGV[1]||"*"
-else
-  puts "usage: service service_name [help|list|start|stop|vi|fix|install|status]"
-  exit 1
-end
-
-if action == "install"
-  if !(previous=get_agent_names(agent_search)).empty?
-    puts "already installed #{agent_search}: #{previous.first}"
-  elsif File.exist?(agent_search)
-    puts "installing #{agent_search}"
-    puts "cp #{agent_search} #{agent_dir}/"
-    `cp #{agent_search} #{agent_dir}/`
+if cmd.install?
+  if (previous=cmd.previous_install)
+    puts "already installed #{cmd.agent_search}: #{previous}"
+  elsif cmd.can_install?
+    cmd.agent.install(cmd.agent_search)
   else
-    options = get_plist_options(agent_search)
+    options = cmd.agent_options
     if options.count == 0
-      puts "could not find plist for #{agent_search}"
+      puts "could not find plist for #{cmd.agent_search}"
     elsif options.count == 1
-      puts "installing #{options.first.split("/").last}"
-      puts "cp #{options.first} #{agent_dir}/"
-      `cp #{options.first} #{agent_dir}/`
+      cmd.agent.install(options.first)
     else
-      puts "ambigious #{agent_search}:"
-      options.each { |option| puts "  #{option.split("/").last}"}
+      puts "ambigious #{cmd.agent_search}:"
+      puts options.map { |option| "  #{option.split("/")[-2..-1].join("/")}" }
     end
   end
   exit
 end
 
-agent_names     = get_agent_names(agent_search)
-short_agent_names = agent_names.map { |an| an.split("/").last }
+agent_names     = cmd.agent_names
 
-if short_agent_names.length == 0
-  puts "service #{agent_search} not found"
-  puts short_agent_names.join("\n")
+if cmd.length == 0
+  puts "service #{cmd.agent_search} not found"
+  puts cmd.short_agent_names.join("\n")
   exit 1
-elsif short_agent_names.length > 1
-  puts "ambigious service name #{agent_search}" unless agent_search == "*"
-  puts short_agent_names.join("\n")
+elsif cmd.length > 1
+  puts "ambigious service name #{cmd.agent_search}" unless cmd.agent_search == "*"
+  puts cmd.short_agent_names.join("\n")
   exit 1
 end
 
-case action
+case cmd.action
 when "list"
   puts ""
   puts "contents of ~/Library/LaunchAgents: "
-  puts "    #{short_agent_names.join("\n    ")}"
+  puts cmd.short_agent_names.map { |name| "    #{name}" }
 when "start", "load"
-  alter_service("load", agent_names.first)
+  cmd.agent.start(cmd.agent_name)
 when "stop", "unload"
-  alter_service("unload", agent_names.first)
-# when "restart", "reload"
-#   alter_service("load", agent_names.first)
-#   # ensure ps aux says it isn't running?
-#   alter_service("unload", agent_names.first)
+  if cmd.docker
+    # cmd.agent.stop_docker(cmd.agent_name)
+    cmd.agent.stop_docker(cmd.agent_search)
+  else
+    cmd.agent.stop(cmd.agent_name)
+  end
 #when "dir"
   # grep the directory from the xml file
   # can we cd into the directory for the user
 #when "log"
   # display the startup log
 when "fix"
-  case short_agent_names.first
+  case cmd.short_agent_name
   when /postgres/
     # may need to add missing directories?
     `rm /usr/local/var/postgres/postmaster.pid`
   else
-    puts "only know how to fix postgres not #{short_agent_names.inspect}"
+    puts "only know how to fix postgres not #{cmd.short_agent_names.inspect}"
     exit 1
   end
 when "vi", "edit", "subl"
   editor=ENV["EDITOR"] || "subl"
-  exec("#{editor} #{agent_names.first}")
+  exec("#{editor} #{cmd.agent_name}")
 when "status"
-  case short_agent_names.first
+  case cmd.short_agent_name
   when /postgres/
     `pg_isready -q`
     puts $? ? "postgres running" : "postgres down"
   else
-    puts "only supports postgres not #{short_agent_names.inspect}"
+    puts "only supports postgres not #{cmd.short_agent_names.inspect}"
     exit 1
   end
 end

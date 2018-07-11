@@ -81,7 +81,5 @@ class GitFork
 end
 
 if __FILE__ == $0
-  # puts ENV.inspect
-  # puts ARGV.inspect
   GitFork.new.run(ENV, ARGV)
 end
