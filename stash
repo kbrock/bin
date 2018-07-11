@@ -39,7 +39,7 @@ class Stash
     when 'list', 'show', 'stats', 'stat', 'diff', 'pop', 'drop',
          'merge', 'apply', 'pluck', 'save', 'push', 'local', 'backup',
          'reword', 'word', 'mv', 'rename', 'head'
-      puts public_send(cmd, args[1])
+      puts send(cmd, args[1])
     else
       save(cmd)
     end
