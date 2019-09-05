@@ -11,9 +11,18 @@ class Agent
     "#{ENV['HOME']}/Library/LaunchAgents"
   end
 
+  # /System/Library/LaunchAgents/
+  # /Library/LaunchAgents/
+  # not as much success:
+  # /System/Library/LaunchDaemons/
+  # /Library/LaunchDaemons/
+
   # names of installed services
   def get_agent_names(partial)
-    Dir["#{agent_dir}/*#{partial}*.plist"] + STATIC_AGENTS.select { |sa| sa =~ /#{partial}/ }
+    (partial != '*' ? Dir[partial] : []) +
+    Dir["#{agent_dir}/*#{partial}*.plist"] +
+    Dir["/Library/LaunchAgents/*#{partial}*.plist"] +
+    (docker ? STATIC_AGENTS.select { |sa| sa =~ /#{partial}/ } : [])
   end
 
   # names of uninstalled homebrew services
@@ -27,6 +36,11 @@ class Agent
       puts "cp #{agent_file_name} #{agent_dir}/"
       `cp #{agent_file_name} #{agent_dir}/`
     end
+  end
+
+  # TODO (there is a "remove" but think unload is what we want)
+  def uninstall(service_name)
+    alter_service("unload", service_name)
   end
 
   def start(service_name)
@@ -60,7 +74,7 @@ class Agent
   # /Library/LaunchAgents /Library/LaunchDaemons
   # TODO get brew list names?
   def alter_service(action, service_name)
-    system("launchctl #{action} -w #{service_name}").tap { |status| puts "issue" unless status }
+    system("launchctl #{action} -w #{service_name}").tap { |status| puts "issue: launchctl #{action} -w #{service_name}" unless status }
   end
 
   def start_postgres_docker
@@ -115,12 +129,19 @@ class Cmd
     @action == "install"
   end
 
+  def supports_multi?
+    %w(list status).include?(@action)
+  end
+
   def agent
     @agent ||= Agent.new.tap { |a| a.docker = true if @docker }
   end
 
   def previous_install
-    if !(previous=agent.get_agent_names(agent_search)).empty?
+    # trim off a full path (or plist information)
+    # you specify the full path if it is ambigious or in a non-standard location
+    short_search = agent_search.split("/").last.sub(".plist","")
+    if !(previous=agent.get_agent_names(short_search)).empty?
       previous.first.split("/").last
     end
   end
@@ -145,6 +166,10 @@ class Cmd
 
   def length
     agent_names.length
+  end
+
+  def star?
+    agent_search == '*'
   end
 
   def agent_name
@@ -205,7 +230,8 @@ if cmd.install?
       cmd.agent.install(options.first)
     else
       puts "ambigious #{cmd.agent_search}:"
-      puts options.map { |option| "  #{option.split("/")[-2..-1].join("/")}" }
+#      puts options.map { |option| "  #{option.split("/")[-2..-1].join("/")}" }
+      puts options
     end
   end
   exit
@@ -217,7 +243,7 @@ if cmd.length == 0
   puts "service #{cmd.agent_search} not found"
   puts cmd.short_agent_names.join("\n")
   exit 1
-elsif cmd.length > 1
+elsif cmd.length > 1 && ! cmd.supports_multi?
   puts "ambigious service name #{cmd.agent_search}" unless cmd.agent_search == "*"
   puts cmd.short_agent_names.join("\n")
   exit 1
@@ -255,8 +281,9 @@ when "vi", "edit", "subl"
   editor=ENV["EDITOR"] || "subl"
   exec("#{editor} #{cmd.agent_name}")
 when "status"
-  case cmd.short_agent_name
-  when /postgres/
+  if cmd.star?
+    puts `launchctl list | grep -v apple`
+  elsif cmd.short_agent_name =~ /postgres/
     `pg_isready -q`
     puts $? ? "postgres running" : "postgres down"
   else
