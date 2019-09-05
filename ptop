@@ -11,9 +11,10 @@ fi
 
 QUERY_COLUMN=current_query
 QUERY_COLUMN=query
-
-echo <<EOF | psql -U postgres | $limit 
-select datname, waiting, date_trunc('second',NOW()-query_start) as runtime, ${QUERY_COLUMN}
+WAITING_COLUMN=waiting
+WAITING_COLUMN=wait_event
+psql -U postgres <<EOF | $limit
+select datname, ${WAITING_COLUMN}, date_trunc('second',NOW()-query_start) as runtime, ${QUERY_COLUMN}
 from pg_stat_activity where ${QUERY_COLUMN} <> '<IDLE>';
-EOF 
+EOF
 
