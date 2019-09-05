@@ -40,8 +40,8 @@ class Beer
       @args = `git diff HEAD --name-only`.chomp.split("\n")
     elsif cmd =~ /^(s|c|db|g|r|generate|server|console|dbconsole|runner)$/
       ENV["ERB_IN_CONFIG"]="true"
-      ENV["SKIP_PRIMORDIAL_SEED"]="true"
-      #ENV["SKIP_SEEDING"]="true"
+      ENV["SKIP_PRIMORDIAL_SEED"]="true" # OLD
+      ENV["SKIP_SEEDING"]="true"
       ENV["RACK_MINI_PROFILER_PATCH"]="notifications" # miq_perf
       ENV["RAILS_SERVE_STATIC_FILES"]="true"
       ENV["DEBUG_ASSETS"]="true" # development.rb
@@ -58,10 +58,10 @@ class Beer
       exec("./bin/update")
     elsif (cmd == "create" || cmd == "db:create") && args.empty?
       ENV["GOOD_MIGRATIONS"]="skip"
-      @args = %w(db:create db:migrate db:seed db:schema:dump db:test:prepare) + @args
+      @args = %w(db:create db:migrate db:seed) + @args
       @cmd = "rake"
     elsif (cmd == "migrate" || cmd == "db:migrate") && args.empty?
-      @args = %w(db:migrate db:schema:dump db:test:prepare) + @args
+      @args = %w(db:migrate) + @args
       @cmd = "rake"
     # elsif cmd == "assets"
     #   bundle, bower, evm:assets:compile
