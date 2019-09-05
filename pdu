@@ -6,13 +6,13 @@
 function usage() {
   echo "usage: $(basename $0) [-h] [-v] [-l limit] [-r] [dbname]" >&2
   echo "    shows disk usage for a database or all databases" >&2
-  echo "    -h shows this help message"
-  echo "    -v vacuums the db first"
-  echo "    -l limits the results (default: 20)"
-  echo "    -r order by row count (default: size)"
-  echo "    -i include indexes (default: false)"
-  echo "    -c show commas"
-  echo "    -f show full info on tables"
+  echo "    -h shows this help message" >&2
+  echo "    -v vacuums the db first" >&2
+  echo "    -l limits the results (default: 20)" >&2
+  echo "    -r order by row count (default: size)" >&2
+  echo "    -i include indexes (default: false)" >&2
+  echo "    -c show commas" >&2
+  echo "    -f show full info on tables" >&2
   exit 1
 }
 
