@@ -29,7 +29,8 @@ class Headphones
   # ==> "Logitech USB Headset"
   def find_source(mode, name)
     name = Regexp.new(name, Regexp::IGNORECASE)
-    sources(mode).select { |n| n =~ name }.first.sub(/ \([a-z]+\)$/,'')
+    src = sources(mode).select { |n| n =~ name }.first
+    src.sub(/ \([a-z]+\)$/,'') if src
   end
 
   def parse(args)
@@ -58,8 +59,10 @@ class Headphones
 
   def set_source(mode, name)
     if (target = find_source(mode, name))
-      puts "set %-6s source: #{target}" % mode unless verbose
+      puts "set %-6s source: %s" % [mode, target] unless verbose
       switch(mode, target)
+    else
+      puts "unknown    source: %s" % name unless verbose
     end
   end
 
