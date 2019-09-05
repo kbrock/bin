@@ -5,6 +5,8 @@
 class Stash
   def usage
     puts "stash [list]           : list of stashes"
+    puts "stash head             : lists the first 10 stashes"
+    puts "stash wc               : counts the number of stashes"
     puts "stash [push] 'comment' : save stash with comment"
     puts "stash local 'comment'  : saves local tree only (not staged)"
     #save does the same thing
@@ -38,7 +40,7 @@ class Stash
       usage
     when 'list', 'show', 'stats', 'stat', 'diff', 'pop', 'drop',
          'merge', 'apply', 'pluck', 'save', 'push', 'local', 'backup',
-         'reword', 'word', 'mv', 'rename', 'head'
+         'reword', 'word', 'mv', 'rename', 'head', 'wc'
       puts send(cmd, args[1])
     else
       save(cmd)
@@ -57,6 +59,10 @@ class Stash
   def list(*)
     list = `git stash list`
     list.gsub(/stash@[{]([0-9]+)[}]/) { emphasize($1) }
+  end
+
+  def wc(*)
+    list = `git stash list | wc -l`
   end
 
   def common(cmd, stash)
