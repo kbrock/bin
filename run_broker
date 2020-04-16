@@ -1,0 +1,1 @@
+lib/workers/bin/run_single_worker.rb --roles=ems_inventory,ems_operations MiqVimBrokerWorker

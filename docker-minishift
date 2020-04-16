@@ -1,0 +1,11 @@
+#!/bin/bash
+
+oc login $(minishift ip):8443 -u developer -p developer
+
+echo "Setting up minishift docker env ..."
+eval $(minishift docker-env)
+echo "Docker env set up."
+
+echo "Logging into minishift docker registry at $DOCKER_HOST ..."
+docker login -u developer -p $(oc whoami -t) $(minishift openshift registry)
+echo "Logged into minishift docker registry."

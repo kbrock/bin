@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+
+if [ $# -eq 1 -a -f "${1}" ] ; then
+  FILENAME=$1
+  DBNAME="vmdb_development_${1##*/}" # filename
+  DBNAME=${DBNAME%%.*} # remove extension
+elif [ $# -eq 2 ] ; then
+  DBNAME=$1
+  FILENAME=$2
+else
+  echo "usage: $(basename $0) dbname filename"
+  exit 1
+fi
+
+if [[ ${DBNAME} = *gz ]] ; then
+  FLAGS="-Fc"
+fi
+
+#createuser --superuser cloudforms
+echo "createdb"
+#createdb ${DBNAME} -O root
+createdb -U postgres -O root -D pg_default -l en_US.UTF-8 -E UTF8 ${DBNAME}
+echo "pg_restore"
+pg_restore -d ${DBNAME} ${FILENAME} -j 4 ${FLAGS}
+echo "fix_auth"
+bundle exec ruby tools/fix_auth.rb --invalid bogus ${DBNAME}
+echo "db:migrate"
+beer db:migrate
+#echo "evm:automate:restore"
+#beer evm:automate:reset
+
+echo "User.update_attributes(:password => 'smartvm')"
+beer r "User.all.each { |u| u.update_attributes(:password => 'smartvm') }"

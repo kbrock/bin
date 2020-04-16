@@ -1,0 +1,139 @@
+#!/usr/bin/env ruby
+
+#require File.expand_path('../config/environment', __FILE__)
+begin
+  require './config/environment'
+rescue Exception => e
+  puts e.message
+end
+
+class Reason
+  # make belongs to separate
+  VALID_AUTOMATIC_INVERSE_MACROS = [:has_many, :has_one, :belongs_to]
+  INVALID_AUTOMATIC_INVERSE_OPTIONS = [:conditions, :through, :polymorphic] #, :foreign_key]
+  # make foreign key separate
+  # INVALID_AUTOMATIC_INVERSE_OPTIONS = ActiveRecord::Reflection::AssociationReflection::INVALID_AUTOMATIC_INVERSE_OPTIONS
+  def reason_inverse_name(src, ref)
+    # def inverse_name; delegate_reflection.send(:inverse_name); end
+    ref = ref.respond_to?(:delegate_reflection) ? ref.delegate_reflection : ref
+
+    if (inv_name = ref.options[:inverse_of])
+      # will this false positive a :through?
+      if inv_name == ref.send(:automatic_inverse_of)
+        "UNNEEDED: `:inverse_of`"
+      elsif !valid_ref?(ref, ref.klass._reflect_on_association(inv_name))
+        "IGNORED: `:inverse_of`" # " `belongs_to` -> `has_many`"
+      else
+        "`:inverse_of`"
+      end
+    else
+      reason_automatic_inverse_of(src, ref)
+    end
+  end
+
+  def reason_automatic_inverse_of(src, ref)
+    reason = reason_can_find_inverse_of_automatically?(src, ref, ref)
+    return reason if reason
+    inverse_name = ActiveSupport::Inflector.underscore(ref.options[:as] || ref.active_record.name.demodulize).to_sym
+
+    begin
+      reflection = ref.klass._reflect_on_association(inverse_name)
+    rescue NameError
+      # Give up: we couldn't compute the klass type so we won't be able
+      # to find any associations either.
+      return "cant compute #{ref.klass}.#{inverse_name}.klass"
+    end
+
+    reason_valid_inverse_reflection?(src, ref, reflection, "#{reflection.try(:active_record).try(:name) || ref.klass}.#{inverse_name}") 
+  end
+
+  # return reason it is BAD
+  def reason_can_find_inverse_of_automatically?(src, ref, reflection) # inverse ( return value if failing)
+    case
+    when reflection.options[:inverse_of] == false
+      "detection disabled with `:inverse_of => false`"
+    when !ref.class::VALID_AUTOMATIC_INVERSE_MACROS.include?(reflection.macro)
+      "`#{ref.macro}` not supported"
+#    when reflection.macro == :belongs_to && (suggest(src, ref) rescue "X").blank?
+#      "`#{ref.macro}`" # no `has_one` available"
+    when !(opts=INVALID_AUTOMATIC_INVERSE_OPTIONS.select { |opt| reflection.options[opt] }).empty?
+      "`:#{opts.join("`, `:")}` not supported"
+    when reflection.options[:foreign_key]
+      "`:foreign_key` not supported"
+    when reflection.scope
+      # do default scopes even come into play?
+      "`scope` not supported (#{reflection.klass})#{" (there is a `default_scope`)" if reflection.klass.default_scopes.size > 0}"
+    end
+  end
+
+  def valid_ref?(ref, tgt_ref)
+    ![:belongs_to, :has_and_belongs_to_many].include?(ref.macro) || ![:has_many, :has_and_belongs_to_many].include?(tgt_ref.macro)
+  end
+
+  def suggest(src, ref)
+    # would be nice to get all the STI ancestors
+    options = [ref.klass, ref.klass.base_class].uniq.flat_map do |k|
+      k.reflections.values.select { |r|
+        (r.klass.base_class rescue nil) == src.base_class
+      }.select { |r| valid_ref?(ref, r) }.map(&:name)
+      # ? select away the has_many ones?
+    end
+    options.empty? ? "" : " (suggested values: `#{options.join("`, `")})`"
+  end
+
+  def reason_valid_inverse_reflection?(src, ref, reflection, name) # inverse (return value if valid or not)
+    case
+    when !reflection
+      possible = suggest(src, ref)
+      if ref.macro != :belongs_to # my logic
+        "no reverse association `#{name}`#{possible}"
+      elsif possible.present?
+        "belongs_to may link to #{possible}"
+      else
+        "`belongs_to` -> `has_many` ignored"
+      end
+    when ref.klass.name != reflection.active_record.name
+      "`#{name}` parent class not `#{ref.klass.name}`"
+    else
+      reason_can_find_inverse_of_automatically?(src, ref, reflection) # return value if valid or not
+    end
+  end
+
+  def reasons(*srcs)
+    srcs = [Tenant, Vm, VmOrTemplate, Host, EmsCluster] if srcs.empty?
+
+    puts
+    puts "|reference|reverse|reason"
+    puts "|---------|-----|------"
+    srcs.select { |src| src.respond_to?(:reflections) }.each do |src|
+      src.reflections.values.each_with_index do |ref, i|
+        value = ref.send(:inverse_name)
+        why = reason_inverse_name(src, ref)
+        if #!value #&& # why && why != "`:inverse_of`" && why !~ /not supported/ &&
+          srcs.include?(ref.klass)
+          puts "|`#{src.name}.#{ref.name}`|#{value ? "`#{ref.klass.name}.#{value}`" : "**NO**"}|#{why || "automatic"}|"
+        end
+      end
+    end
+    nil
+  end
+end
+
+if false
+Reason.new.reasons(
+Tenant, Vm, VmOrTemplate, Host, EmsCluster,
+MiqServer,
+Zone,
+MiqQueue,
+ExtManagementSystem,
+Host,
+Tagging,
+Tag,
+HostsStorage,
+Storage,
+EmsCluster,
+MiqRegion,
+VmOrTemplate,
+MiqTask,
+Configuration)
+end

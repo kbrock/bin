@@ -1,0 +1,6 @@
+docker run -p 5432:5432 \
+           -d --rm -e POSTGRES_PASSWORD=postgres \
+           -e LANG=en_US.UTF-8 \
+           -v /usr/local/var/postgres:/var/lib/postgresql/data --name postgres-vmdb postgres:9.5
+sleep 1
+docker logs -f postgres-vmdb

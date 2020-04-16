@@ -42,11 +42,13 @@ class GitDb
       # MiqServer.first.guid
       # suffix=`git config branch.$(git symbolic-ref -q --short HEAD).suffix`.chomp
       # File.write("GUID#{suffix}", MiqServer.first.guid)
-      link("GUID", "#{ver_path}/GUID#{suffix}")
-      Dir.chdir("certs") do
-        link("v2_key", "#{ver_path}/v2_key#{suffix}") || begin
-          #puts "falling back to development encryption key"
-          link("v2_key", "#{ver_path}/v2_key.dev")
+      #link("GUID", "#{ver_path}/GUID#{suffix}")
+      if Dir.exist?("certs")
+        Dir.chdir("certs") do
+          link("v2_key", "#{ver_path}/v2_key#{suffix}") || begin
+            #puts "falling back to development encryption key"
+            link("v2_key", "#{ver_path}/v2_key.dev")
+          end
         end
       end
     else
@@ -57,14 +59,14 @@ class GitDb
   # @param [Boolean] keep_if_missing false if the file should be deleted (default true)
   def link(base, specific, keep_if_missing = true)
     if File.exist?(specific)
-      puts "#{specific.split("ver/").last} : #{File.read(specific).split("\n").first}"
+      # puts "#{specific.split("ver/").last} : #{File.read(specific).split("\n").first}"
       File.delete(base) if File.exist?(base) || File.symlink?(base)
       File.symlink(specific, base)
       true
     else
       File.delete(base) if File.exist?(base) && !keep_if_missing
       # determine specific?
-      puts "no  #{File.basename(specific)}"
+      # puts "no  #{File.basename(specific)}"
       false
     end
   end
@@ -77,9 +79,9 @@ class GitDb
   def verify_database(suffix)
     db = `psql -l`.chomp.split("\n").map { |x| x.split("|").first.strip }.detect { |x| x =~ /_development#{suffix}$/ }
     if db
-      puts "yes database: #{db}"
+      puts "database: #{db}"
     else
-      puts "no  database (*_development#{suffix})"
+      puts "NO DATABASE (*_development#{suffix})"
     end
   end
 

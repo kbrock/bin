@@ -1,0 +1,237 @@
+#!/usr/bin/env ruby
+
+require 'optparse'
+require 'yaml'
+require 'erb'
+
+class VmdbTool
+  ACTIONS=%w(start stop dump load).freeze
+  def self.instance(reset = false)
+    @instance = nil if reset
+    @instance ||= new
+  end
+
+  # parameters
+
+  attr_accessor :dry_run
+  attr_accessor :verbose
+  attr_accessor :actions
+
+  class DatabaseYml
+    # rails_root?
+    attr_accessor :filename # filename of the yaml file
+    attr_accessor :env      # rails environment
+
+    attr_accessor :hostname
+    attr_accessor :database
+    attr_accessor :username
+    attr_accessor :password
+
+    def initialize
+      @user = ENV["PGUSER"] || "root"
+      @pass = ENV["PGPASSWORD"] || "smartvm"
+      @db = "vmdb_database"
+    end
+
+    def load(fn = filename)
+      return unless fn && env
+      hash = YAML.load(ERB.new(File.read(fn)).result)
+      hash[env].each { |n, v| public_send("#{n}=", v) if respond_to?("#{n}=") }
+    end
+  end
+
+  class DatabaseOptions
+    attr_accessor :filename # filename of the dump file
+    attr_accessor :threads  # # threads to use for dumping
+
+    def initialize
+      @threads = 4
+    end
+  end
+
+  def db_yml ; @db_yml ||= DatabaseYml.new ; end
+  def db_opts ; @db_opts ||= DatabaseOptions.new ; end
+
+  # parsing parameters
+
+  class OptSetter
+    def initialize(opts, model, env)
+      @opts  = opts
+      @model = model
+      @env   = env # not thrilled, but will do or now
+    end
+
+    def opt(attr_name, env_name, *args, &block)
+      block ||= lambda { |v| @model.send("#{attr_name}=", v) } # allow custom setters
+      if env_name && (value = @env[env_name])
+        block.call(value) # default to ENV[] value
+      end
+      if attr_name && attr_name !~ /^pass/ && (value = @model.send(attr_name))
+        args.last << " [#{value}]" # append default value to description
+      end
+      @opts.on(*args, &block)
+    end
+  end
+
+  def opt(opts, model, env)
+    yield OptSetter.new(opts, model, env)
+  end
+
+  def parse(env, argv)
+    db_yml.env = "development"
+    options = OptionParser.new do |opts|
+      opts.program_name = "vmdb"
+      opts.version = "0.0.1"
+      opts.banner = "Usage: vmdb [options] action"
+      opt(opts, self, env) do |o|
+        o.opt(:verbose, "VERBOSE", "-v", "--verbose", "--[no-]verbose", "Run verbosely")
+        o.opt(:dry_run,       nil, "--dry-run", "Dry run (do not run)")
+      end
+      opt(opts, db_yml, env) do |o|
+        o.opt(:env, "RAILS_ENV", "-e STRING", "--env STRING", "Rails env for yml file")
+        o.opt(nil, nil, "-y STRING", "--yml STRING", "database.yaml configuration file") do |filename|
+          db_yml.load(filename)
+        end
+        o.opt(:hostname, "PGHOST", "-h STRING", "--host STRING", "Database host")
+        o.opt(:username, "PGUSER", "-U STRING", "--username STRING", "Postgres user")
+        o.opt(:database, "PGDATABASE", "-d STRING", "--dbname STRING", "Database name")
+        o.opt(:password, "PGPASSWORD", "-p STRING", "--password STRING", "Database name") # -W
+      end
+      opt(opts, db_opts, env) do |o|
+        o.opt(:threads, nil, "-j STRING", Integer, "number of threads for dump and load")
+        o.opt(:filename, nil, "-f STRING", "--file STRING", "filename for database backup")
+      end
+    end
+    options.parse!(argv)
+    self.actions = argv
+    self
+  end
+
+  def requires(action, *keys)
+    object = nil
+    failed = false
+    keys.each do |key|
+      if !key.is_a?(Symbol)
+        object = key
+      elsif !object.send(key)
+        failed = true
+        STDERR.puts("for action #{action}, please specify #{key}")
+      end
+    end
+    exit 1 if failed
+  end
+
+  # execution
+
+  def tools ; @tools ||= DatabaseTools.new ; end
+  def server ; @server ||= ServerTools.new ; end
+
+  def run
+    # actions = define_actions do |a|
+    #   a.action "dump", db_yml, :username, :database, db_opts, :filename do
+    #     tools.pg_dump(db_yml, db_opts)
+    #   end
+    # end
+    # actions.run(argv)
+    fail = false
+    puts "action required" and fail = true if actions.empty?
+    actions.each do |action|
+      case action
+      when "start"
+        server.start
+      when "stop"
+        server.stop
+      when "dump"
+        fail = 
+          requires(action, db_yml, :username, :database, db_opts, :filename) ||
+          tools.pg_dump(db_yml, db_opts) ||
+          fail
+      when "load"
+        fail = 
+          requires(action, db_yml, :username, :database, db_opts, :filename) ||
+          tools.pg_restore(db_yml, db_opts) ||
+          fail
+      when "region"
+        # fail =
+        #   requires(action, db_yaml)
+      when "workers"
+     else
+        puts "unknown action: #{action}"
+        fail = true
+      end
+    end
+    exit 1 if fail
+  end
+
+  def launch(*cmd)
+    puts cmd.inspect if verbose || dry_run
+    system(*cmd) unless dry_run
+  end
+
+  def self.launch(*args)
+    instance.launch(*args)
+  end
+
+  class DatabaseTools
+    def pg_dump(db, opts)
+      args = %w(pg_dump -v -F custom)
+      args.unshift({"PGPASSWORD" => db.password}) if db.password
+      add_flag(args, "-h", db.hostname)
+      add_flag(args, "-U", db.username)
+      add_flag(args, "-f", opts.filename)
+      add_flag(args, "-j", opts.threads)
+      args.push(db.database)
+      VmdbTool.launch(*args)
+      false
+    end
+
+    def pg_restore(db, opts)
+      args = %w(pg_restore -v )
+      args.unshift({"PGPASSWORD" => db.password}) if db.password
+      add_flag(args, "-h", db.hostname)
+      add_flag(args, "-U", db.username)
+      add_flag(args, "-d", db.database)
+      add_flag(args, "-j", opts.threads)
+      args.push(opts.filename)
+      VmdbTool.launch(*args)
+      false
+    end
+
+    private
+    def add_flag(args, flg, value)
+      args << flg << value unless value.nil? || value.empty?
+    end
+
+    # def flag(flg, value)
+    #   " #{flg} \"#{value}\"" unless value.nil? || value.empty?
+    # end
+  end
+
+  class ServerTools
+    def service_name ; "evmserverd" ; end
+
+    def running?
+    end
+
+    def start
+      service(service_name, "start")
+    end
+
+    def stop
+      if (running = running?)
+        service(service_name, "stop")
+      end
+      yield if block_given?
+    ensure
+      start if running && block_given?
+    end
+
+    private
+
+    def service(name, cmd)
+      VmdbTool.launch %{service #{name} #{cmd}}
+    end
+  end
+end
+
+VmdbTool.instance.parse(ENV, ARGV).run

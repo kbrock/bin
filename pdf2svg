@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+
+set -e
+
+format=$(basename $0)
+
+format=${format#*2}
+# extension: svg:cairo => svg
+extension=${format%:*}
+
+# -o will open the file
+if [ "$1" = "-o" ] ; then
+  shift
+  open="open"
+else
+  open="echo"
+fi
+
+for i in "$@" ; do
+  target=${i%.*}.${extension}
+
+  if [ -f $target ] ; then
+    echo "target exists"
+  else
+    inkscape \
+      --without-gui \
+      --file=$i \
+      --export-plain-svg=${target} 
+  fi
+
+  ${open} ${target}
+done
+

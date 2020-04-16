@@ -1,0 +1,85 @@
+#!/usr/bin/env ruby
+ 
+# http://pastebin.test.redhat.com/524199
+
+require 'csv'
+require 'open3'
+require 'optparse'
+require 'ostruct'
+ 
+options = OpenStruct.new
+ 
+###
+# Default to PSS plot
+###
+options.chart_type = "PSS Memory Usage"
+options.ylabel = "PSS (bytes)"
+options.datacol = 8
+options.format = "%7.0f"
+date_range = "unknown"
+input_file_name = nil
+output_file_name = ""
+output_file_name_suffix = "pss"
+ 
+OptionParser.new do |opt|
+  opt.banner = "usage: plot_usage [options]"
+  opt.on('-i', '--input INPUT_FILE')   { |o| input_file_name = o }
+  opt.on('-o', '--output OUTPUT_FILE') { |o| output_file_name = o }
+  opt.on('-t', '--title TITLE')        { |o| options.chart_title = o }
+  opt.on('-d', '--date DATE')          { |o| date_range = o }
+  opt.on('-p', '--pss') {
+    options.chart_type = "PSS"
+    options.ylabel = "PSS (bytes)"
+    options.datacol = 8
+    options.format = "%7.0f"
+    output_file_name_suffix = "pss"
+  }
+  opt.on('-m', '--mem') {
+    options.chart_type = "% Memory"
+    options.ylabel = "Percent Memory Used"
+    options.datacol = 9
+    options.format = "%7.0f"
+    output_file_name_suffix = "mem"
+  }
+  opt.on('-c', '--cpu') {
+    options.chart_type = "% CPU"
+    options.ylabel = "CPU Usage (percent)"
+    options.datacol = 11
+    options.format = "%7.2f"
+    output_file_name_suffix = "cpu"
+  }
+end.parse!
+ 
+if output_file_name.empty?
+  output_file_name = input_file_name
+  output_file_name = input_file_name.sub(".csv", "_") + "#{output_file_name_suffix}" + ".png"
+end
+ 
+if (defined?(options.output_file_name)).nil?
+   options.output_file_name = options.input_file_name
+end
+ 
+data = CSV.read(input_file_name, {:col_sep => ","})
+data.collect! { |item| item[options.datacol].to_f}
+data.shift # removes the header
+   
+
+gnuplot_commands = <<"End"
+  set title "#{options.chart_type} : #{options.chart_title}"
+  set ylabel "#{options.ylabel}"
+  set xlabel "Time Interval (5 Minute Intervals) #{date_range}"
+  set terminal png size 1024.768
+  set output "#{output_file_name}"
+  set xrange [0:#{data.size}]
+  # set autoscale
+  set format y "#{options.format}"
+  set nokey
+  plot "-" with points
+End
+ 
+data.each_with_index do |y, x|
+    gnuplot_commands << x.to_s + " " + y.to_s + "\n"
+end
+gnuplot_commands << "e\n"
+ 
+Open3.capture2( "gnuplot", :stdin_data=>gnuplot_commands, :binmode=>true)
