@@ -4,12 +4,6 @@
 
 # create a change log template for the current project
 
-changelog = Changelog.new
-
-if ARGV.size == 2
-else
-end
-
 require 'erb'
 
 class Changelog
@@ -21,7 +15,8 @@ class Changelog
   end
 
   def changelog_text
-    ERB.new(DATA.read).result
+    url=base_url
+    ERB.new(DATA.read).result(binding)
   end
 
   def tags
@@ -57,15 +52,16 @@ class Changelog
   end
 
   def cur_remote(branch = cur_branch)
-    git("config branch.#{branch}.remote")
+    ret = git("config branch.#{branch}.remote")
+    ret unless ret.empty?
   end
-
 
   # echo $(git remote-url $1) | sed -e 'sX^git@\([^:]*\):Xhttp://\1/X' -e 'sX\.git$XX')
   # @param remote_url [String] git@domain:user/repo.git
   # @return http://domain/user/repo/
   def base_url
     # can we leverage url for?
+    remote = cur_remote || cur_remote("master") || "origin"
     remote_url = git("config --get remote.#{remote}.url") # TODO: pass in
     remote_url.gsub(%r{^git@([^:]*):}){"http://#{$1}/"}.gsub(/\.git$/,'')
   end
@@ -76,6 +72,13 @@ class Changelog
     `git #{args.join(" ")}`.chomp
   end
 end
+
+
+changelog = Changelog.new
+
+# if ARGV.size == 2
+# else
+# end
 
 changelog.create
 __END__
@@ -90,47 +93,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - de translation from @mpbzh.
 
 ### Changed
-- Start versioning based on the current English version at 0.3.0 to help
+- Start versioning based on the current English version at 0.0.2 to help
 translation authors keep things up-to-date.
 
 ### Fixed
 
-## [0.2.0] - #{today}
+## [0.0.2] - #{today}
 ### Added
 - RU translation from @aishek.
 - pt-BR translation from @tallesl.
 - es-ES translation from @ZeliosAriex.
 
-## [0.1.0] - 2015-10-06
-### Changed
-- Remove exclusionary mentions of "open source" since this project can benefit
-both "open" and "closed" source projects equally.
-
-### Fixed
-- Fix Markdown links to tag comparison URL with footnote-style links.
-
-## [0.0.6] - 2014-12-12
-### Added
-- README section on "yanked" releases.
-
-## [0.0.5] - 2014-08-09
-### Added
-- Markdown links to version tags on release headings.
-- Unreleased section to gather unreleased changes and encourage note
-keeping prior to releases.
-
 ## 0.0.1 - 2014-05-31
 ### Added
 - good stuff
 
-[Unreleased]: https://github.com/olivierlacan/keep-a-changelog/compare/v0.3.0...HEAD
-[0.3.0]: https://github.com/olivierlacan/keep-a-changelog/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/olivierlacan/keep-a-changelog/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/olivierlacan/keep-a-changelog/compare/v0.0.8...v0.1.0
-[0.0.8]: https://github.com/olivierlacan/keep-a-changelog/compare/v0.0.7...v0.0.8
-[0.0.7]: https://github.com/olivierlacan/keep-a-changelog/compare/v0.0.6...v0.0.7
-[0.0.6]: https://github.com/olivierlacan/keep-a-changelog/compare/v0.0.5...v0.0.6
-[0.0.5]: https://github.com/olivierlacan/keep-a-changelog/compare/v0.0.4...v0.0.5
-[0.0.4]: https://github.com/olivierlacan/keep-a-changelog/compare/v0.0.3...v0.0.4
-[0.0.3]: https://github.com/olivierlacan/keep-a-changelog/compare/v0.0.2...v0.0.3
-[0.0.2]: https://github.com/olivierlacan/keep-a-changelog/compare/v0.0.1...v0.0.2
+[Unreleased]: <%=url%>/compare/v0.0.2...HEAD
+[0.0.2]: <%=url%>/compare/v0.0.1...v0.0.2
