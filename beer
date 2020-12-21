@@ -34,10 +34,10 @@ class Beer
     if cmd == "rake" || cmd == "ruby"
     elsif cmd == "gn" || cmd == "master"
       @cmd = "rspec"
-      @args = `git diff upstream/master... --name-only`.chomp.split("\n")
+      @args += `git diff upstream/master... --name-only`.chomp.split("\n")
     elsif cmd == "head"
       @cmd = "rspec"
-      @args = `git diff HEAD --name-only`.chomp.split("\n")
+      @args += `git diff HEAD --name-only`.chomp.split("\n")
     elsif cmd =~ /^(s|c|db|g|r|generate|server|console|dbconsole|runner)$/
       ENV["ERB_IN_CONFIG"]="true"
       ENV["SKIP_PRIMORDIAL_SEED"]="true" # OLD
@@ -115,7 +115,8 @@ class Beer
         # convert models to spec names
         # migrations have a slightly different name, fix that too
 
-        next(x) if x.start_with?("-")
+        # handle cases like --seed 10
+        next(x) unless x =~ /\.rb/
         x = x.sub("migrate", "migrations").gsub(%r{(?:./)?(?:app|db)/(.*).rb}) { "spec/#{$1}_spec.rb" }
 
         optionally_quote track_down(x).select {|f| f.include?("_spec.rb") }
