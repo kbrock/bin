@@ -1,1 +1,18 @@
-lib/workers/bin/run_single_worker.rb --roles=ems_inventory,ems_operations MiqVimBrokerWorker
+#!/usr/bin/env bash
+
+#? MiqMyServer.seed
+# Zone.seed
+
+# class MiqVimBrokerWorker::Runner
+#   def heartbeat
+#   end
+# end
+
+# row = MiqVimBrokerWorker.find_current || MiqVimBrokerWorker.create_worker_record
+# guid = row.guid
+
+# runner = MiqVimBrokerWorker::Runner.new(:guid => guid)
+# runner.start
+
+bundle exec ruby -Igems/pending/VMwareWebService/ gems/pending/VMwareWebService/test/MiqVimBrokerServer.rb
+
