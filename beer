@@ -116,7 +116,7 @@ class Beer
         # migrations have a slightly different name, fix that too
 
         # handle cases like --seed 10
-        next(x) unless x =~ /\.rb/
+        next(x) if x =~ /(-|\A\d+\Z)/
         x = x.sub("migrate", "migrations").gsub(%r{(?:./)?(?:app|db)/(.*).rb}) { "spec/#{$1}_spec.rb" }
 
         optionally_quote track_down(x).select {|f| f.include?("_spec.rb") }
