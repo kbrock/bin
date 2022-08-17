@@ -9,7 +9,8 @@ class Stash
     puts "stash wc               : counts the number of stashes"
     puts "stash [push] 'comment' : save stash with comment"
     puts "stash local 'comment'  : saves local tree only (not staged)"
-    #save does the same thing
+    puts "stash patch 'comment'  : saves (prompts which patches should save) "
+    #push does the same thing
     puts "stash [show] [#]       : show stash (list of files) - quick diff"
     puts "stash diff [#]         : show stash (diff)"
     puts "stash pop [#]          : applies and pops stash@{#} or head"
@@ -38,9 +39,9 @@ class Stash
       show(cmd)
     when 'help'
       usage
-    when 'list', 'show', 'stats', 'stat', 'diff', 'pop', 'drop',
-         'merge', 'apply', 'pluck', 'save', 'push', 'local', 'backup',
-         'reword', 'word', 'mv', 'rename', 'head', 'wc'
+    when 'apply', 'backup', 'diff', 'drop', 'head', 'list', 'local',
+         'merge', 'mv', 'patch', 'pluck', 'pop', 'push', 'rename',
+         'reword', 'save', 'show', 'stats', 'stat', 'wc', 'word'
       puts send(cmd, args[1])
     else
       save(cmd)
@@ -57,8 +58,8 @@ class Stash
   end
 
   def list(*)
-    list = `git stash list`
-    list.gsub(/stash@[{]([0-9]+)[}]/) { emphasize($1) }
+    list = `git stash list --color --pretty=format:'%Cblue%gd%Creset: %s %C(green)(%cr)%Creset'`
+    list.gsub(/stash@[{]([0-9]+)[}]/) { $1 }
   end
 
   def wc(*)
@@ -104,12 +105,16 @@ class Stash
   end
 
   def save(comment)
-    `git stash save "#{clean_comment(comment)}"`
+    `git stash push -m "#{clean_comment(comment)}"`
   end
   alias_method :push, :save
 
   def local(comment)
-    `git stash save --keep-index "#{clean_comment(comment)}"`
+    `git stash push --keep-index -m "#{clean_comment(comment)}"`
+  end
+
+  def patch(comment)
+    `git stash push -p -m "#{clean_comment(comment)}"`
   end
 
   def backup(comment)
@@ -124,11 +129,11 @@ class Stash
     comment.gsub('"',"\\\"")
   end
 
-  # reword = pop, save (must be clean first)
+  # reword = pop, push (must be clean first)
   #http://stackoverflow.com/questions/25931026/how-can-i-rename-a-git-stash
-  #git config --global alias.stash-rename '!_() { rev=$(git rev-parse $1) && git stash drop $1 || exit 1 ; git diff-index --quiet HEAD; s=$?; [ $s != 0 ] && git stash save "tmp stash from stash-rename"; git stash apply $rev && shift && git stash save "$@" && [ $s != 0 ] && git stash pop stash@{1}; }; _'
+  #git config --global alias.stash-rename '!_() { rev=$(git rev-parse $1) && git stash drop $1 || exit 1 ; git diff-index --quiet HEAD; s=$?; [ $s != 0 ] && git stash push "tmp stash from stash-rename"; git stash apply $rev && shift && git stash push "$@" && [ $s != 0 ] && git stash pop stash@{1}; }; _'
   # def word(stash, comment)
-  #   puts `git stash-rename <stash> [save options] [<message>]`
+  #   puts `git stash-rename <stash> [push options] [<message>]`
   #   puts `git stash-rename stash@{#{stash}}`
   # end
   # alias_method :reword, :word
