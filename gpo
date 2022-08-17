@@ -5,6 +5,12 @@
 # gpo origin # pushes to origin. if it is the first use, then track origin
 # gpo # pushes to the tracked branch, usally origin/HEAD
 
+# I make this mistake every now and then.
+# want to capture the use case when it happens in the future
+if [ $# -gt 1 ] ; then
+  echo "only 1 parameter please."
+  exit 1
+fi
 
 # push current branch (HEAD) to the origin
 #alias gpo="git push origin HEAD"

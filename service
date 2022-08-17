@@ -27,7 +27,8 @@ class Agent
 
   # names of uninstalled homebrew services
   def get_plist_options(partial)
-    Dir["/usr/local/opt/*#{partial}*/*.plist"]
+    lst = Dir["/usr/local/opt/#{partial}/*.plist"]
+    lst.empty? ? Dir["/usr/local/opt/*#{partial}*/*.plist"] : lst
   end
 
   def install(agent_file_name)
