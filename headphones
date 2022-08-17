@@ -1,7 +1,11 @@
 #!/usr/bin/env ruby
 
-# install:
+#### install:
+#
 # brew install switchaudio-osx
+#
+###
+
 # Usage: /usr/local/Cellar/switchaudio-osx/1.0.0/SwitchAudioSource [-a] [-c] [-t type] [-n] -s device_name
 #   -a             : shows all devices
 #   -c             : shows current device
@@ -11,6 +15,14 @@
 #   -s device_name : sets the audio device to the given device by name
 
 require 'optparse'
+
+unless defined?(JSON)
+class JSON
+  def self.generate(obj)
+    obj.inspect.gsub(/([{,]):/){|m|m[0]}.gsub(/=>/,":")
+  end
+end
+end # ifdef
 
 class Headphones
   attr_accessor :verbose
@@ -54,7 +66,7 @@ class Headphones
 
   # @param mode [:input|output] device mode
   def sources(mode = :output)
-    switch(mode, "-a")
+    @sources ||= switch(mode, "-a")
   end
 
   def set_source(mode, name)
@@ -85,7 +97,21 @@ class Headphones
     device = "-s \"#{device}\"" unless device.start_with?("-")
     cmd = "SwitchAudioSource -t #{mode} #{device}"
     puts cmd if verbose
-    `#{cmd}`.chomp.tap { |r| puts r,"" if verbose }.split("\n")
+    ret=`#{cmd}`.chomp.tap { |r| puts r,"" if verbose }.split("\n")
+    if $?.exitstatus != 0
+      unless verbose
+        $stderr.puts "error running command:"
+        $stderr.puts cmd, ""
+      end
+      `which SwitchAudioSource > /dev/null`
+      if $?.exitstatus != 0
+        $stderr.puts "", "please make sure SwitchAudioSource is installed"
+        $stderr.puts "", "brew install switchaudio-osxswitchaudio-osx", ""
+      end
+      puts "exiting due to error"
+      exit
+    end
+    ret
   end
 end
 
