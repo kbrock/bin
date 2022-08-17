@@ -38,6 +38,9 @@ class Beer
     elsif cmd == "head"
       @cmd = "rspec"
       @args += `git diff HEAD --name-only`.chomp.split("\n")
+    elsif cmd == "check"
+      @cmd = "ruby"
+      @args += ["-c"] +`git diff HEAD --name-only`.chomp.split("\n") +`git diff master --name-only`.chomp.split("\n")
     elsif cmd =~ /^(s|c|db|g|r|generate|server|console|dbconsole|runner)$/
       ENV["ERB_IN_CONFIG"]="true"
       ENV["SKIP_PRIMORDIAL_SEED"]="true" # OLD
@@ -73,6 +76,9 @@ class Beer
       @cmd = "rspec" # ruby -I rspec
     elsif cmd == "spec"
       @cmd = "rspec"
+    elsif cmd == "check"
+      @cmd = "ruby"
+      @args = %w[-c] +`git diff HEAD --name-only`.chomp.split("\n")
     end
 
     self
@@ -147,7 +153,7 @@ class Beer
   end
 
   def print
-    puts (cmd_line + ["#", mug, mug]).join " "
+    puts "#{cmd_line.join(" ")} ##{mug}#{mug}"
     self
   end
 
