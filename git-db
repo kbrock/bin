@@ -16,7 +16,6 @@ class GitDb
       puts "options:"
       puts "   -b set suffix to branch name"
       puts "   -X clear suffix"
-      puts "   -f forces the links to be set again"
       puts
       return
     end
@@ -25,49 +24,17 @@ class GitDb
       @suffix = ''
     elsif suffix == "-b"
       @suffix = "_#{branchname.gsub(".","_")}"
-    elsif suffix == "-f"
-      @suffix = cur_suffix
-      force = true
     else
       @suffix = "_#{suffix}".gsub(/^.*_(?:development|test)/, '').gsub(/^__+/,'_')
     end
 
-    if suffix != cur_suffix || force
+    if suffix != cur_suffix
       puts "suffix #{cur_suffix || "NONE"} => #{suffix}"
       self.cur_suffix = suffix
       puts
       verify_database(suffix) unless suffix.empty?
-
-      #link("REGION", "#{ver_path}/REGION#{suffix}", false) # only needed for 54, 55
-      # MiqServer.first.guid
-      # suffix=`git config branch.$(git symbolic-ref -q --short HEAD).suffix`.chomp
-      # File.write("GUID#{suffix}", MiqServer.first.guid)
-      #link("GUID", "#{ver_path}/GUID#{suffix}")
-      if Dir.exist?("certs")
-        Dir.chdir("certs") do
-          link("v2_key", "#{ver_path}/v2_key#{suffix}") || begin
-            #puts "falling back to development encryption key"
-            link("v2_key", "#{ver_path}/v2_key.dev")
-          end
-        end
-      end
     else
       puts_suffix("suffix")
-    end
-  end
-
-  # @param [Boolean] keep_if_missing false if the file should be deleted (default true)
-  def link(base, specific, keep_if_missing = true)
-    if File.exist?(specific)
-      # puts "#{specific.split("ver/").last} : #{File.read(specific).split("\n").first}"
-      File.delete(base) if File.exist?(base) || File.symlink?(base)
-      File.symlink(specific, base)
-      true
-    else
-      File.delete(base) if File.exist?(base) && !keep_if_missing
-      # determine specific?
-      # puts "no  #{File.basename(specific)}"
-      false
     end
   end
 
@@ -90,12 +57,6 @@ class GitDb
     puts "#{message}: #{cs ? "'#{cs}'" : "NONE"}"
   end
 
-  # note, since Dir.pwd may change, final answer
-  def ver_path(ref = ".")
-    @ver_dir ||= Pathname.new(git("rev-parse --show-toplevel") + "/.ver")
-    ref = File.expand_path(ref, Dir.pwd)
-    @ver_dir.relative_path_from(Pathname.new(ref)).to_s
-  end
 
   def cur_suffix
     git("config --get branch.#{branchname}.suffix")
@@ -158,3 +119,8 @@ development:
   <<: *base
   database: vmdb_development<%=db_suffix %>
   min_messages: notice
+test: &test
+  <<: *base
+  pool: 3
+  database: vmdb_test<%=db_suffix %>
+  # Silence these: 'NOTICE:  CREATE TABLE will create..
