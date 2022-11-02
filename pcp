@@ -3,4 +3,4 @@ if [ $# -ne 2 ] ; then
   exit 1
 fi
 echo "copying database $1 to $2"
-createdb -O root -T $1 $2
+createdb -O ${PGUSER:-root} -T $1 $2
