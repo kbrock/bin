@@ -4,59 +4,98 @@ require 'pathname'
 
 # add database name into your git config file
 # so it takes that database name instead of defaulting to the branch 
-class GitDb
-  #attr_accessor :remote, :branch, :mode, :params
-  attr_accessor :suffix, :branchname
-  def run(_env, argv)
-    parse_args(argv)
 
-    if suffix.nil? || suffix == "-v"
-      puts_suffix("current suffix")
+class GitDb
+  # hack - need a better way
+  BASENAME="vmdb_"
+
+  # attribute @test [Boolean] test mode does not exit
+  attr_accessor :test
+  attr_accessor :new_suffix
+  attr_accessor :mode
+  def run(_env, argv)
+    # parse params
+    orig_suffix
+    # defaults:
+    @new_suffix = orig_suffix
+    @mode = :verbose
+
+    option = argv[0]
+    case option
+    when nil, "-v"
+      @mode = :verbose
+    when "-s"
+      @mode = :suffix
+    when "-d"
+      @mode = :database
+    when "-X", ""
+      @new_suffix = ''
+    when "-b"
+      @new_suffix = "_#{branchname.gsub(".","_")}"
+    else
+      #@new_suffix = "_#{option}".gsub(/^.*_(?:development|test)/, '').gsub(/^__+/,'_')
+      @new_suffix = "_#{option}".gsub(/^#{BASENAME}(?:development|test)/, '').gsub(/^__+/,'_')
+    end
+
+    self.cur_suffix = new_suffix if change?
+
+    case @mode
+    when :verbose
+      if new_suffix == orig_suffix
+        puts "suffix: #{quote_suffix(orig_suffix)}"
+      else
+        puts "suffix: #{quote_suffix(orig_suffix)} => #{quote_suffix(new_suffix)}"
+      end
       puts
+      if !new_suffix.empty? && change?
+        db = dbname
+        if db
+          puts "database: #{db}"
+        else
+          puts "NO DATABASE (#{BASENAME}development#{new_suffix})"
+        end
+        puts
+      end
+      # unsure if we want to keep this
       puts "options:"
       puts "   -b set suffix to branch name"
       puts "   -X clear suffix"
       puts
-      return
+    when :database
+      puts dbname
+    when :suffix
+      puts new_suffix
     end
 
-    if suffix == "-X" || suffix.empty?
-      @suffix = ''
-    elsif suffix == "-b"
-      @suffix = "_#{branchname.gsub(".","_")}"
+    if test
+      !!dbname # true if there is a database
     else
-      @suffix = "_#{suffix}".gsub(/^.*_(?:development|test)/, '').gsub(/^__+/,'_')
-    end
-
-    if suffix != cur_suffix
-      puts "suffix #{cur_suffix || "NONE"} => #{suffix}"
-      self.cur_suffix = suffix
-      puts
-      verify_database(suffix) unless suffix.empty?
-    else
-      puts_suffix("suffix")
+      exit(dbname ? 0 : 1) # 0 if there is a database
     end
   end
 
-  def parse_args(argv)
-    @suffix=argv[0]
-    @branchname = cur_branch
+  ######### cached / derived functions
+
+  def quote_suffix(suffix)
+    suffix && suffix != "" ? "'#{suffix}'" : "NONE"
   end
 
-  def verify_database(suffix)
-    db = `psql -l`.chomp.split("\n").map { |x| x.split("|").first.strip }.detect { |x| x =~ /_development#{suffix}$/ }
-    if db
-      puts "database: #{db}"
-    else
-      puts "NO DATABASE (*_development#{suffix})"
-    end
+  def dbname
+    @dbname ||= cur_dbname
   end
 
-  def puts_suffix(message)
-    cs = cur_suffix
-    puts "#{message}: #{cs ? "'#{cs}'" : "NONE"}"
+  def change?
+    orig_suffix != new_suffix
   end
 
+  # NOTE: need to set at startup
+  def orig_suffix
+    @orig_suffix ||= cur_suffix
+  end
+
+  def cur_dbname
+    `psql -l`.chomp.split("\n").map { |x| x.split("|").first.strip }.detect { |x| x =~ /^#{BASENAME}development#{new_suffix}$/ }
+  end
 
   def cur_suffix
     git("config --get branch.#{branchname}.suffix")
@@ -70,13 +109,17 @@ class GitDb
     end
   end
 
+  def branchname
+    @branchname ||= cur_branch
+  end
+
   def cur_branch
     git("symbolic-ref -q --short HEAD")
   end
 
-  def cur_remote(branch = cur_branch)
-    git("config branch.#{branch}.remote")
-  end
+  # def cur_remote(branch = cur_branch)
+  #   git("config branch.#{branch}.remote")
+  # end
 
   # echo $(git remote-url $1) | sed -e 'sX^git@\([^:]*\):Xhttp://\1/X' -e 'sX\.git$XX')
   # @param remote_url [String] git@domain:user/repo.git
