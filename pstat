@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+
+# processes running in a postgres server
+
+if [ $# -eq 1 ] ; then
+  limit="grep $1"
+else
+  #no limit
+  limit='cat -'
+  #limit='less -'
+fi
+PGDATABASE=${1-$PGDATABASE}
+PGDATABASE=${PGDATABASE-postgres}
+
+echo "db: ${PGDATABASE}"
+psql -U postgres ${PGDATABASE} <<EOF | $limit 
+SELECT schemaname, relname, last_autovacuum, last_autoanalyze
+FROM "pg_catalog"."pg_stat_all_tables"
+ORDER BY schemaname, relname;
+EOF

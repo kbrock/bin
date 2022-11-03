@@ -1,0 +1,52 @@
+#!/bin/bash
+
+# print references to a column across tables
+#
+# usage:
+#   pcol colname
+#   pcol colname dbname
+
+# defaulting limit to 50
+limit=50
+dbname=${PGDATABASE:-vmdb_development}
+exact=false
+
+function usage() {
+  echo "usage: $(basename $0) [-h] [-l limit] [-d dbname] [-x] colname" >&2
+  echo "    shows disk usage for a database or all databases" >&2
+  echo "    -d database name (default: ${dbname})" >&2
+  echo "    -h shows this help message" >&2
+  echo "    -l limits the results (default: $limit)" >&2
+  echo "    -x exact only (defaults to fuzzy match)" >&2
+  exit 1
+}
+
+while getopts "hvl:xd:" opt ; do
+  case $opt in
+    d) dbname=$OPTARG ;;
+    h) usage ; exit 1 ;;
+    l) limit=$OPTARG ;;
+    x) exact="true" ;;
+    \?) echo "Invalid option: -$OPTARG" >&2 ;;
+  esac
+done
+shift $((OPTIND-1))
+
+col="$1"
+shift 1
+
+if [[ $exact = "false" ]] ; then
+  fuzzycol="%${col}%"
+else
+  fuzzycol=$col
+fi
+
+psql $dbname "$@" << SQL
+  SELECT c.relname AS table_name, a.attname AS column_name
+  FROM pg_class AS c
+  INNER JOIN pg_attribute AS a on a.attrelid = c.oid
+  WHERE c.relkind = 'r' AND a.attname LIKE '${fuzzycol}'
+  ORDER BY case when a.attname = '${col}' then 0 else 1 end, a.attname, table_name
+  LIMIT ${limit}
+  ;
+SQL
