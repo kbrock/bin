@@ -45,7 +45,6 @@ class Beer
       ENV["ERB_IN_CONFIG"]="true"
       ENV["SKIP_PRIMORDIAL_SEED"]="true" # OLD
       ENV["SKIP_SEEDING"]="true"
-      ENV["RACK_MINI_PROFILER_PATCH"]="notifications" # miq_perf
       ENV["RAILS_SERVE_STATIC_FILES"]="true"
       ENV["DEBUG_ASSETS"]="true" # development.rb
       @args.unshift cmd
