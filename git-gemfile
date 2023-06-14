@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 
 # touch a gemfile, so the gemfile lock will be pegged to this file
+root_dir=$(git rev-parse --show-toplevel)
 branch="$(git symbolic-ref -q --short HEAD)"
-ver_dir="$(git rev-parse --show-toplevel)/.ver"
+ver_dir="${root_dir}/.ver"
 
 version_gemfile="${ver_dir}/Gemfile.lock.${branch}"
 
 if [ ! -f "${version_gemfile}" ] ; then
   echo "creating: ${ver_dir}/Gemfile.lock.${branch}"
+  touch ${ver_dir}/Gemfile.lock.${branch}
   # create the symlink
   . $(git rev-parse --git-dir)/hooks/post-checkout
-  bundle
-else
-  echo "already exists: ${ver_dir}/Gemfile.lock.${branch}"
+  echo "please run bundle"
 fi
 
 ret=$(git diff upstream/master -- Gemfile)
