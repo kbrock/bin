@@ -18,7 +18,7 @@ class Stash
     puts "stash apply [#]        : applies but does NOT drop stash@{#} or head"
     puts "stash merge [#]        : merges stash@{#} or head into current"
     puts "stash drop [#]         : drops/throws away stash@{#} or head"
-    puts "stash backup 'comment' : saves stash but leaves files checkedout"
+    puts "stash backup 'comment' : saves stash but leaves files checked out"
 #    puts "stash word # 'comment' : rewords comment for stash@{#}"
   end
 

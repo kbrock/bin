@@ -1,6 +1,5 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env ruby --disable-gem
 
-require 'pathname'
 
 # add database name into your git config file
 # so it takes that database name instead of defaulting to the branch 
@@ -22,15 +21,21 @@ class GitDb
 
     option = argv[0]
     case option
-    when nil, "-v"
+    # by default we display "suffix and options"
+    # we also check if the database exists
+    when nil, "-v", "--verbose"
       @mode = :verbose
-    when "-s"
+    # display the suffix (don't display options or "NONE")
+    when "-s", "--suffix"
       @mode = :suffix
-    when "-d"
+    # display the full database name
+    when "-d", "--database"
       @mode = :database
-    when "-X", ""
+    # clear the suffix, and display all in verbose mode
+    when "-X", "", "--clear"
       @new_suffix = ''
-    when "-b"
+    # set suffix to the branch name
+    when "-b", "--branch"
       @new_suffix = "_#{branchname.gsub(".","_")}"
     else
       #@new_suffix = "_#{option}".gsub(/^.*_(?:development|test)/, '').gsub(/^__+/,'_')

@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env ruby --disable-gems
 
 #### install:
 #
@@ -14,8 +14,7 @@
 #   -n             : cycles the audio device to the next one
 #   -s device_name : sets the audio device to the given device by name
 
-require 'optparse'
-
+# mock json
 unless defined?(JSON)
 class JSON
   def self.generate(obj)
@@ -46,12 +45,23 @@ class Headphones
   end
 
   def parse(args)
-    OptionParser.new do |opt|
-      opt.banner = "Usage: headphones target"
-      opt.on('-l', '--list', "List all devices") { |x| @list = x }
-      opt.on('-v', '--verbose', "Verbose")  { |v| @verbose = v }
-      opt.parse!(args)
+    # avoiding opt parse to remove reliance on external gems
+    # OptionParser.new do |opt|
+    #   opt.banner = "Usage: headphones target"
+    #   opt.on('-l', '--list', "List all devices") { |x| @list = x }
+    #   opt.on('-v', '--verbose', "Verbose")  { |v| @verbose = v }
+    #   opt.parse!(args)
+    # end
+
+    if args.include?("-h") || args.include?("--help")
+      puts "Usage: headphones target"
+      puts "-l, --list                       List all devices"
+      puts "-v, --verbose                    Verbose"
+      exit 1
     end
+
+    @list = true if args.delete("-l") || args.delete("--list")
+    @verbose = true if args.delete("-v") || args.delete("--verbose")
 
     # assume we're enabling the Logitech headphones
     @target = args[0] || "Logitech"
@@ -96,7 +106,7 @@ class Headphones
     return unless device
     device = "-s \"#{device}\"" unless device.start_with?("-")
     cmd = "SwitchAudioSource -t #{mode} #{device}"
-    puts cmd if verbose
+    $stderr.puts cmd if verbose
     ret=`#{cmd}`.chomp.tap { |r| puts r,"" if verbose }.split("\n")
     if $?.exitstatus != 0
       unless verbose
@@ -108,11 +118,11 @@ class Headphones
         $stderr.puts "", "please make sure SwitchAudioSource is installed"
         $stderr.puts "", "brew install switchaudio-osxswitchaudio-osx", ""
       end
-      puts "exiting due to error"
+      $stderr.puts "exiting due to error"
       exit
     end
     ret
   end
 end
 
-Headphones.run(ARGV)
+Headphones.run(ARGV.dup)

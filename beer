@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env ruby --disable-gem
 
 # rake => bundle exec rake
 # test/* => bundle exec ruby -Itest

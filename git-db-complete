@@ -1,18 +1,29 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env ruby --disable-gems
 # hook this up using:
 #
 # function _git_db { __gitcomp "$(git-db-complete $cur)" ; }
 
-orig_suffix = ARGV[0] || exit
+# no arg, then list all
+orig_suffix = ARGV[0] || ""
+
+if orig_suffix[0] == '-'
+  puts ['-X', '-b']
+  exit
+end
+
+# vmdb_development_hulk => _development_hulk
+# vmdb_test_hulk        => _development_hulk
+# hulk                  => _development_hulk
 
 suffix = "_#{orig_suffix}".gsub(/^.*_(?:development|test)/, '').gsub(/^__+/,'_')
 suffix = "_development#{suffix}"
+
+# all databases
 databases = `psql -l`.chomp.split("\n").map { |x| x.split("|").first.strip }
 
-suggestions = databases.select { |x| x =~ /#{suffix}/ }.map {|x| x.gsub(/^.*#{suffix}/, orig_suffix) }
+# suggest databases that are similar to the value entered. and 2 possible options
+suggestions = ['-X', '-b'] + databases.select { |x| x =~ /#{suffix}/ }.map {|x| x.gsub(/^.*#{suffix}/, orig_suffix) }
 
-# typically, would just remove the _development stuff
-# instead, tacking on the user's specified prefix
+# NOTE: need to check prefix match to project e.g.: vmdb for "$prefix_development_$suffix"
 
-suggestions = suggestions
 puts suggestions
