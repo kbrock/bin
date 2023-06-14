@@ -149,10 +149,8 @@ database.yml:
 
 # PostgreSQL
 #
-# <%   $db_count ||=0 ; $db_count +=1 %>
+# < %   $db_count ||=0 ; $db_count +=1 %>
 # <%   db_suffix = `git config branch.$(git symbolic-ref -q --short HEAD).suffix`.chomp rescue nil %>
-# <%   evm_version = File.read(File.join(Rails.root, 'VERSION')).chomp rescue 'master' unless db_suffix %>
-# <%   db_suffix ||= (evm_version == 'master') ? '' : "_#{evm_version.split('.')[0..1].join('_')}" %>
 # < %   STDERR.puts "** EVM vmdb_#{Rails.env.to_s}#{db_suffix} ** #{$db_count}" % >
 ---
 base: &base
