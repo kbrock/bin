@@ -14,7 +14,7 @@ if [ $# -eq 1 ] ; then
     git db "${@}"
 fi
 
-DBNAME=$(git db -d)
+DBNAME=$(git db -d 2> /dev/null)
 PRIMARY_EXISTS=$(dbexists "${DBNAME}")
 if [ -z "${PRIMARY_EXISTS}" ] ; then
   echo "Primary (${DBNAME}) does not exist (reason: ${PRIMARY_EXISTS}) "
