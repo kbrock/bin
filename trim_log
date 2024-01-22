@@ -2,6 +2,7 @@
 
 #require 'term/ansicolor'
 #include Term::ANSIColor
+# constants
 red="\e[31m"
 blue="\e[34m"
 green="\e[32m"
@@ -9,7 +10,7 @@ bold="\e[1m"
 magenta="\e[35m"
 reset="\e[0m"
 
-
+MESSAGE_LENGTH=600
 SHOW_PID = true
 SHOW_DATE_TIMES = false
 SHOW_TIMES = true
@@ -76,7 +77,7 @@ ARGF.each do |line|
   msg.gsub!(/(?<=Old Objects: \[)([0-9.]*)(?=\])/) { "#{magenta}#{$1}#{reset}" }
 
 # truncate sql
-  trim_msg = msg =~ /SELECT|INSERT|UPDATE/ ? msg[0..200] : msg
+  trim_msg = msg =~ /SELECT|INSERT|UPDATE/ ? msg[0..MESSAGE_LENGTH] : msg
   ts = tm.split(":")
   hour = ts[-3]
   min = ts[-2]

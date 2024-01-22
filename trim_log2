@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+
+import re
+import sys
+import errno
+
+MESSAGE_LENGTH=600
+red="\033[31m"
+blue="\033[34m"
+green="\033[32m"
+bold="\033[1m"
+magenta="\033[35m"
+reset="\033[0m"
+
+#               severity, dateTtime.ms                 #pid     :thread_id      severity      progname: msg
+COMMON="^\[-*\] ([A-Z]), \[([-0-9]*)T([0-9:]*)\.([0-9]*) (#[0-9]*:[a-z0-9]*)\] +([A-Z]{0,5}) -- ([^:]*): (.*)$"
+
+# parse command line
+if len(sys.argv) > 1:
+    inf = open(sys.argv[1], 'r')
+else:
+    inf = sys.stdin
+
+
+try:
+  for line in map(str.rstrip, inf):
+    md = re.search(COMMON, line)
+    if not(md):
+      print(line)
+      continue
+    s1 = md.group(1)
+    dt = md.group(2)
+    tm = md.group(3)
+    ms = md.group(4)
+    pid = md.group(5)
+    sev = md.group(6)
+    progname = md.group(7)
+    msg = md.group(8)
+
+    # abbreviate input
+    msg = re.sub("ManageIQ::Providers::Vmware::InfraManager", 'Vmware', msg)
+    msg = re.sub("MiqEmsMetricsProcessorWorker::Runner", 'EmsMetricsProcessor', msg)
+    msg = re.sub("(,?[ A-Za-z]*: \[\])", '', msg)
+    msg = re.sub("(,? (PID|GUID):?[= ]\[[-a-z0-9]*\])", '', msg)
+
+    # this seems redundant to me
+    msg = re.sub(",? (Timeout|Priority): \[[0-9]*\]", '', msg)  # the desired timeout is always the same
+    msg = re.sub(",? (Zone): \[[A-Z a-z0-9_]*\]", '', msg) # it is always "my zone"
+
+    # msg = re.sub"/,? (Message id): \[[0-9]*\]", '', msg) # not relevant
+    msg = re.sub(",? (Role): \[[A-Z a-z_]*\]", '', msg) # temporary
+    msg = re.sub(",? (State): \[ready\]", '', msg) # not relevant
+    msg = re.sub(",? (Ident): \[[A-Z a-z0-9_]*\]", '', msg) # temporary
+    msg = re.sub("ManageIQ::Providers::", '', msg) # temporary
+    msg = re.sub("UTC", '', msg) # temporary
+
+    # timeouts
+    # Timed Out .... after X seconds
+    # timed out after X seconds
+    msg = re.sub("(timed out)/", f"{red}\\1{reset}", msg)
+    msg = re.sub("(?<=after )([0-9.]* seconds)", f"{red}\\1{reset}", msg)
+    msg = re.sub("(?<=\[)(timeout)(?=\])", f"{red}\\1{reset}", msg)
+    # times
+    msg = re.sub("(?<=\()([0-9.]*ms)(?=\))", f"{green}\\1{reset}", msg)
+    msg = re.sub("(?<=\()([0-9.]*ms - [0-9]*rows)(?=\))", f"{green}\\1{reset}", msg)
+    msg = re.sub("(?<=:total_time=>)([0-9.]*)", f"{green}\\1{reset}", msg)
+
+    msg = re.sub("([0-9.]*)(?= seconds)", f"{green}\\1{reset}", msg)
+    msg = re.sub("(?<=\[)([0-9.]*)(?=\] seconds)", f"{green}\\1{reset}", msg)
+    msg = re.sub("(?<=CPU Time \[)([0-9.]*)(?=\])", f"{green}\\1{reset}", msg)
+
+
+
+    # commands
+    msg = re.sub("(?<=MIQ\()([^\)]*)(?=\))", f"{blue}\\1{reset}", msg, count=1)
+    msg = re.sub("(SELECT|INSERT|DELETE|UPDATE|BEGIN|COMMIT|ROLLBACK)", f"{blue}\\1{reset}", msg)
+    msg = re.sub("(?<=Command: \[)([^\]]*)(?=\])", f"{blue}\\1{reset}", msg, count=1)
+
+    # started completed messages
+    msg = re.sub("(Completed )(\d+)( [A-Za-z ]+ in )(\d+ms)", f"{blue}\\1{red}\\2{reset}\\3{green}\\4{reset}", msg)
+    msg = re.sub("(Started )([A-Z]+ \"[^\"]*\") for [0-9].*$", f"{blue}\\1{reset}\\2", msg) # ip is always local. date is already in log line - drop 'em
+
+    # # truncate sql
+    sqlm = re.search("SELECT|INSERT|UPDATE", msg)
+    if (sqlm):
+      trim_msg = msg[0:MESSAGE_LENGTH]
+    else:
+      trim_msg = msg
+
+    print(f"[-{pid}-] [{bold}{tm}.{ms[0:2]}{reset}] - {trim_msg}{reset}")
+except IOError as e:
+  if e.errno == errno.EPIPE:
+    pass
+
+  if inf is not sys.stdin:
+    inf.close()
