@@ -9,7 +9,7 @@ class Stash
     puts "stash wc               : counts the number of stashes"
     puts "stash [push] 'comment' : save stash with comment"
     puts "stash local 'comment'  : saves local tree only (not staged)"
-    puts "stash stage 'comment'  : saves stashed files (not local)"
+    puts "stash stage 'comment'  : saves staged files (not local)"
     puts "stash patch 'comment'  : saves (prompts which patches should save) "
     #push does the same thing
     puts "stash [show] [#]       : show stash (list of files) - quick diff"
@@ -40,7 +40,9 @@ class Stash
       show(cmd)
     when 'help'
       usage
-    when 'apply', 'backup', 'diff', 'drop', 'head', 'list', 'local',
+    when 'diff'
+      puts send(cmd, args[1], args[2])
+    when 'apply', 'backup', 'drop', 'head', 'list', 'local',
          'merge', 'mv', 'patch', 'pluck', 'pop', 'push', 'rename',
          'reword', 'save', 'show', 'stage', 'staged', 'stats', 'stat', 'wc', 'word'
       puts send(cmd, args[1])
@@ -79,11 +81,12 @@ class Stash
   alias_method :stat, :show
   alias_method :stats, :show
 
-  def diff(stash)
-    common 'show --color=always', stash
-    # cmd = 'show --color=always'
-    # stash ||= "0"
-    # exec "git","stash #{cmd} stash@{#{stash}} | less -r"
+  def diff(stash, stash2)
+    if stash2
+      `git diff stash@{#{stash}} stash@{#{stash2}}`
+    else
+      common 'show --color=always', stash
+    end
   end
 
   def pop(stash)
