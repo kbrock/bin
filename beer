@@ -54,6 +54,7 @@ class Beer
     #   cmd = "ruby -I test"
     elsif cmd =~ /^(cop|rubocop|rubo)$/
       @cmd = "rubocop"
+      @args += `git diff HEAD --name-only`.chomp.split("\n") +`git diff master --name-only`.chomp.split("\n")
     elsif cmd == "update"
       ENV["SKIP_TEST_RESET"]="1"
       ENV["SKIP_AUTOMATE_RESET"]="1"
