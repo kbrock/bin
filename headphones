@@ -6,13 +6,42 @@
 #
 ###
 
-# Usage: /usr/local/Cellar/switchaudio-osx/1.0.0/SwitchAudioSource [-a] [-c] [-t type] [-n] -s device_name
+# use this instead? https://github.com/mw98/alfred-sound-switcher
+
+# Usage: /opt/homebrew/Cellar/switchaudio-osx/1.2.2/SwitchAudioSource [-a] [-c] [-t type] [-n] -s device_name | -i device_id | -u device_uid
 #   -a             : shows all devices
 #   -c             : shows current device
-# 
-#   -t type        : device type (input/output/system).  Defaults to output.
+
+#   -f format      : output format (cli/human/json). Defaults to human.
+#   -t type        : device type (input/output/system/all).  Defaults to output.
+#   -m mute        : sets the mute status (mute/unmute/toggle).  For input/output only.
 #   -n             : cycles the audio device to the next one
+#   -i device_id   : sets the audio device to the given device by id
+#   -u device_uid  : sets the audio device to the given device by uid or a substring of the uid
 #   -s device_name : sets the audio device to the given device by name
+
+# see https://github.com/alanhg/alfred-workflows/tree/master/switch-audio
+# see https://github.com/mike182uk/alfred-switch-audio/tree/main/workflow
+#     https://github.com/alexlafroscia/alfred-switch-audio-source
+#
+# SwitchAudioSource -a -fcli # csv
+
+# LogHead,input,80,
+#   AppleUSBAudioEngine:Logitech:LogHead:130000:2,1
+# MBP Microphone,input,75,
+#   BuiltInMicrophoneDevice
+# ZoomAudioDevice,input,106,
+#   zoom.us.zoomaudiodevice.001
+
+# LG HDR WQHD,output,91,
+#   1E6D2B77-0000-0000-0B1E-0104B5502278
+# LogHead,output,80,
+#   AppleUSBAudioEngine:Logitech:LogHead:130000:2,1
+# MBP Speakers,output,68,
+#   BuiltInSpeakerDevice
+# ZoomAudioDevice,output,106,
+#   zoom.us.zoomaudiodevice.001
+
 
 # mock json
 unless defined?(JSON)
