@@ -1,0 +1,3 @@
+#!/usr/bin/env sh
+
+launchctl stop com.apple.CalendarAgent && launchctl start com.apple.CalendarAgent
