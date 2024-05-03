@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# deprecated. using [push] default = simple
+# git push -u origin HEAD 
+# git push
+
 # examples:
 
 # gpo origin # pushes to origin. if it is the first use, then track origin

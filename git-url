@@ -107,6 +107,7 @@ class GitUrl
   # @return http://domain/user/repo/
   def base_url
     # can we leverage url for?
+    # TODO: do we want this instead? remote_url = git("remote get-url #{remote}")
     remote_url = git("config --get remote.#{remote}.url") # TODO: pass in
     remote_url.gsub(%r{^git@([^:]*):}){"http://#{$1}/"}.gsub(/\.git$/,'')
   end

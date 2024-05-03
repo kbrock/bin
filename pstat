@@ -1,20 +1,114 @@
 #!/usr/bin/env bash
 
 # processes running in a postgres server
+# https://dba.stackexchange.com/questions/21068/aggressive-autovacuum-on-postgresql
 
-if [ $# -eq 1 ] ; then
-  limit="grep $1"
-else
-  #no limit
-  limit='cat -'
-  #limit='less -'
+# usage copy/pasted, and more of a todo right now.
+
+function usage() {
+  echo "usage: $(basename $0) [-h] [-v] [-l limit] [-r] [dbname] [tablename]" >&2
+  echo "    shows statistics for a database" >&2
+  echo "    -h shows this help message" >&2
+  echo "    -v vacuums the db first" >&2
+  echo "    -l limits the results (default: 20)" >&2
+  echo "    -e exists" >&2
+  echo "    -r order by row count (default: name)" >&2
+  echo "    -c show commas" >&2
+  echo "    -t include toasts" >&2
+  echo "    -o order by column (default: 3 DESC / total size)" >&2
+  exit 1
+}
+
+limit=20
+order="PSUT.schemaname, PSUT.relname"
+where=""
+relkind="'r'"
+
+while getopts "cfhil:rvtoe" opt ; do
+  case $opt in
+    c) commas="\pset numericlocale" ;;
+    h) usage ;;
+    i) relkind="$relkind, 'i'" ;;
+    l) limit=$OPTARG ;;
+    t) relkind="$relkind, 't'" ;;
+    r) order="PSUT.reltuples DESC" ;;
+    v) vacuum='vacuum full;' ;;
+    f) full="true" ;;
+    e) where="${where} AND C.reltuples > 0" ;;
+    o) order=$OPTARG ;;
+    \?) echo "Invalid option: -$OPTARG" >&2 ;;
+  esac
+done
+shift $((OPTIND-1))
+
+# assuming PGUSER is set
+# thinking probably want 
+dbname="$1"
+export PGDATABASE="${dbname:-postgres}"
+
+where="${where} AND relkind in ($relkind)"
+
+if [ $# -gt 1 ] ; then # has tablename
+  where="${where} AND PSUT.relname like '%${2}%'"
+  #order="${order}, relname"
 fi
-PGDATABASE=${1-$PGDATABASE}
-PGDATABASE=${PGDATABASE-postgres}
 
-echo "db: ${PGDATABASE}"
-psql -U postgres ${PGDATABASE} <<EOF | $limit 
-SELECT schemaname, relname, last_autovacuum, last_autoanalyze
-FROM "pg_catalog"."pg_stat_all_tables"
-ORDER BY schemaname, relname;
-EOF
+###
+
+if [ -z "${dbname}" ] ; then
+  psql << SQL
+    ${commas}
+    SELECT PSUT.schemaname, PSUT.relname, PSUT.last_autovacuum, PSUT.last_autoanalyze
+    FROM "pg_catalog"."pg_stat_all_tables" PSUT
+    JOIN pg_class C
+        ON PSUT.relid = C.oid
+    WHERE 1=1 ${where}    
+    ORDER BY ${order}
+    LIMIT ${limit};
+SQL
+
+else
+  psql << SQL
+    ${commas}
+WITH rel_set AS
+(
+    SELECT
+        oid,
+        CASE WHEN reloptions IS NULL
+               OR split_part(split_part(array_to_string(reloptions, ','), 'autovacuum_vacuum_threshold=', 2), ',', 1) = ''
+             THEN current_setting('autovacuum_vacuum_threshold')::BIGINT
+             ELSE split_part(split_part(array_to_string(reloptions, ','), 'autovacuum_vacuum_threshold=', 2), ',', 1)::BIGINT
+        END AS rel_av_vac_threshold,
+        CASE WHEN reloptions IS NULL
+               OR split_part(split_part(array_to_string(reloptions, ','), 'autovacuum_vacuum_scale_factor=', 2), ',', 1) = ''
+             THEN current_setting('autovacuum_vacuum_scale_factor')::NUMERIC
+             ELSE split_part(split_part(array_to_string(reloptions, ','), 'autovacuum_vacuum_scale_factor=', 2), ',', 1)::NUMERIC
+        END AS rel_av_vac_scale_factor
+    FROM pg_class
+)
+SELECT
+    PSUT.relname,
+    to_char(PSUT.last_vacuum,     'YYYY-MM-DD HH24:MI') AS last_vacuum,
+    to_char(PSUT.last_autovacuum, 'YYYY-MM-DD HH24:MI') AS last_autovacuum,
+--    pg_size_pretty(pg_relation_size(c.oid)) AS "size",
+    to_char(C.reltuples,          '9G999G999G999')      AS n_tup,
+    to_char(PSUT.n_dead_tup,      '9G999G999G999')      AS dead_tup,
+    to_char(RS.rel_av_vac_threshold + RS.rel_av_vac_scale_factor * C.reltuples, '9G999G999G999') AS av_threshold,
+    CASE
+        WHEN (RS.rel_av_vac_threshold + RS.rel_av_vac_scale_factor * C.reltuples) < PSUT.n_dead_tup
+        THEN '*'
+    ELSE ''
+    END AS expect_av
+FROM
+    -- pg_stat_all_tables PSUT
+    pg_stat_user_tables PSUT
+    JOIN pg_class C
+        ON PSUT.relid = C.oid
+    JOIN rel_set RS
+        ON PSUT.relid = RS.oid
+WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+${where}
+ORDER BY C.reltuples DESC
+LIMIT ${limit};
+SQL
+fi
