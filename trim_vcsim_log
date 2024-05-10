@@ -11,17 +11,27 @@ magenta="\e[35m"
 gray="\e[37m"
 reset="\e[0m"
 
-REQUEST ="#{red}#{"=" * 40}  Request #{"=" * 40}#{reset}"
+REQUEST ="#{red}#{"=" * 40 } Request  #{"=" * 40}#{reset}"
 RESPONSE="#{blue}#{"=" * 40} Response #{"=" * 40}#{reset}"
+
+# color for request or response
+req_res=""
 
 ARGF.each do |line|
   if /^Request:/.match?(line)
     msg=REQUEST
+    req_res = red
   elsif /^Response:/.match?(line)
     msg=RESPONSE
+    req_res = blue
   elsif (md = /</.match(line))
     msg = line.chomp
     msg.gsub!(/:?soapenv:?/, '')
+    # msg.gsub!(/<_this type="([^"]*)">([^<]*)<\/_this>/) { "<_this type=\"#{red}#{$1}#{reset}\">#{red}#{$2}#{reset}<\/_this>"}
+    ##msg.gsub!(/<_this type="([^"]*)">/) { "<_this type=\"#{red}#{$1}#{reset}\">"}
+    ##msg.gsub!(/<returnval type="([^"]*)">/) { "<returnval type=\"#{blue}#{$1}#{reset}\">"}
+    msg.gsub!(/ type="([^"]*)"/) { " type=\"#{req_res}#{$1}#{reset}\"" }
+
     msg.gsub!(/(<Envelope[^>]*>)(<Body>)(<[A-Za-z:]*[^>]*>)(.*)(<\/[A-Za-z:]*[^>]*>)(<\/Body>)(<\/Envelope>)/) { "#{$1}\n#{$2}\n#{green}#{$3}#{reset}\n#{reset}#{$4}#{reset}#{"\n" unless $4.empty?}#{green}#{$5}#{reset}\n#{$6}\n#{$7}" }
     # don't think we have <Message/> but just in case
     msg.gsub!(/(<Envelope[^>]*>)(<Body>)(<[A-Za-z:]*[^>]*\/>)(<\/Body>)(<\/Envelope>)/) { "#{$1}\n#{$2}\n#{green}#{$3}#{reset}\n#{$6}\n#{$7}" }
