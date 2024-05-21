@@ -19,28 +19,36 @@ req_res=""
 
 ARGF.each do |line|
   if /^Request:/.match?(line)
-    msg=REQUEST
+    puts REQUEST
     req_res = red
+    # prune off Request:
+    msg = line[8..].chomp
   elsif /^Response:/.match?(line)
-    msg=RESPONSE
+    puts RESPONSE
     req_res = blue
-  elsif (md = /</.match(line))
-    msg = line.chomp
+    # prune off Response:
+    msg = line[9..].chomp.strip
+  else
+    msg = line.chomp.strip
+  end
+
+  if /<\?xml[^?]+\?>$/.match?(msg)
+    next
+  elsif msg.start_with?('2024')
+    msg ="#{gray}#{msg}#{reset}"
+  elsif msg.start_with?('export')
+    msg ="#{green}#{msg}#{reset}"
+  elsif msg.start_with?('<')
     msg.gsub!(/:?soapenv:?/, '')
-    # msg.gsub!(/<_this type="([^"]*)">([^<]*)<\/_this>/) { "<_this type=\"#{red}#{$1}#{reset}\">#{red}#{$2}#{reset}<\/_this>"}
-    ##msg.gsub!(/<_this type="([^"]*)">/) { "<_this type=\"#{red}#{$1}#{reset}\">"}
-    ##msg.gsub!(/<returnval type="([^"]*)">/) { "<returnval type=\"#{blue}#{$1}#{reset}\">"}
-    msg.gsub!(/ type="([^"]*)"/) { " type=\"#{req_res}#{$1}#{reset}\"" }
+    # <_this type="" OR <returnval type=""
+    msg.gsub!(/( type=")([^"]*)(")/) { "#{$1}#{req_res}#{$2}#{reset}#{$3}" }
 
     msg.gsub!(/(<Envelope[^>]*>)(<Body>)(<[A-Za-z:]*[^>]*>)(.*)(<\/[A-Za-z:]*[^>]*>)(<\/Body>)(<\/Envelope>)/) { "#{$1}\n#{$2}\n#{green}#{$3}#{reset}\n#{reset}#{$4}#{reset}#{"\n" unless $4.empty?}#{green}#{$5}#{reset}\n#{$6}\n#{$7}" }
     # don't think we have <Message/> but just in case
     msg.gsub!(/(<Envelope[^>]*>)(<Body>)(<[A-Za-z:]*[^>]*\/>)(<\/Body>)(<\/Envelope>)/) { "#{$1}\n#{$2}\n#{green}#{$3}#{reset}\n#{$6}\n#{$7}" }
   else
-    msg = line.chomp
+    # undefined behavior
   end
-
-  msg ="#{gray}#{msg}#{reset}" if msg =~ /^2024/
-  msg ="#{green}#{msg}#{reset}" if msg =~ /^export/
 
   puts msg
 end
