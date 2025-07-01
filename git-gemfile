@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# possible feature addition:
+# argument 1 links to that branch
+#   impl: ln -s $1 .ver/$branch
+
 # touch a gemfile, so the gemfile lock will be pegged to this file
 root_dir=$(git rev-parse --show-toplevel)
 branch="$(git symbolic-ref -q --short HEAD)"
@@ -19,3 +23,43 @@ ret=$(git diff upstream/master -- Gemfile)
 if [[ $( echo "${ret}" | wc -c) -eq 1 ]] ; then
   echo "note: gemfile matches upstream/master"
 fi
+
+exit
+
+#!/bin/sh
+#
+# * Put this in manageiq/.git/hooks/post-checkout
+# * Make sure you chmod +x this file!!!
+# * If you have a long running branch such as rails4 and want a Gemfile.lock
+#    just for this branch:
+#    `git gemfile`
+
+branch=$(git symbolic-ref -q --short HEAD)
+root_dir=$(git rev-parse --show-toplevel)
+ver_dir="${root_dir}/.ver"
+
+## dropped configuration for branch specific gemfiles
+## configured via: git config --add branch.${branch}.gemfile Gemfile.lock.${branch}"
+# git_lockfile=$(git config --get branch.$branch.gemfile)
+
+branch_lockfile="${ver_dir}/Gemfile.lock.${branch}"
+if [ -f ${branch_lockfile} ] ; then
+  lockfile="${branch_lockfile}"
+else
+  ret=$(git diff upstream/master -- Gemfile)
+
+  if [[ $( echo "${ret}" | wc -c) -gt 1 ]] ; then
+    echo "    Gemfile differs from upstream/master, may want to run a custom gem lockfile via:"
+    echo "       git gemfile"
+    echo ">> ${ret}"
+  fi
+
+  lockfile="${ver_dir}/Gemfile.lock.master"
+fi
+
+if [ -f "$lockfile" ] ; then
+  rm -f ${root_dir}/Gemfile.lock
+  ln -s $lockfile ${root_dir}/Gemfile.lock
+fi
+
+# TODO: may want to get v2key or GUID back
