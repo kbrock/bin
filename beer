@@ -34,16 +34,17 @@ class Beer
     if cmd == "rake" || cmd == "ruby"
     elsif cmd == "gn" || cmd == "master"
       @cmd = "rspec"
-      @args += `git diff upstream/master... --name-only`.chomp.split("\n")
+      @args += `git diff upstream/master --name-only`.chomp.split("\n")
     elsif cmd == "head"
       @cmd = "rspec"
       @args += `git diff HEAD --name-only`.chomp.split("\n")
     elsif cmd == "check"
-      @cmd = "ruby"
-      @args += ["-c"] +`git diff HEAD --name-only`.chomp.split("\n") +`git diff master --name-only`.chomp.split("\n")
+      # @cmd = "ruby"
+      # @args += ["-c"] +`git diff HEAD --name-only`.chomp.split("\n") +`git diff master --name-only`.chomp.split("\n")
+      @cmd = "syntax_suggest"
+      @args += `git diff HEAD --name-only`.chomp.split("\n") +`git diff master --name-only`.chomp.split("\n")
     elsif cmd =~ /^(s|c|db|g|r|generate|server|console|dbconsole|runner)$/
       ENV["ERB_IN_CONFIG"]="true"
-      ENV["SKIP_PRIMORDIAL_SEED"]="true" # OLD
       ENV["SKIP_SEEDING"]="true"
       ENV["RAILS_SERVE_STATIC_FILES"]="true"
       ENV["DEBUG_ASSETS"]="true" # development.rb
@@ -68,11 +69,15 @@ class Beer
       @cmd = "rake"
     # elsif cmd == "assets"
     #   bundle, bower, evm:assets:compile
+    # I can never remember this
+    elsif cmd == "ui" || cmd == "ui:update" || cmd == "update:ui"
+      @args = ["update:ui"]
+      @cmd = "rake"
     elsif cmd =~ %r{:[a-z]|-T}
-      args.unshift cmd
+      @args.unshift cmd
       @cmd = "rake"
     elsif cmd =~ %r{(:?[^r]|^)(spec|app|db|lib)/} || cmd =~ /_spec.rb/
-      args.unshift cmd
+      @args.unshift cmd
       @cmd = "rspec" # ruby -I rspec
     elsif cmd == "spec"
       @cmd = "rspec"
@@ -94,7 +99,7 @@ class Beer
     fn, line = f_l(fn, lp)
     if !fn
       []
-    elsif File.exists?(fn)
+    elsif File.exist?(fn)
       [[fn, line].join]
     elsif !fn.include?('/')
       Dir.glob("**/#{fn}").select { |y| y.to_s !~ /factories\/|support\// }.map { |ref| "#{ref.to_s}#{line}" }
