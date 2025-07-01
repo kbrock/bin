@@ -16,24 +16,28 @@ function usage() {
   echo "    -c show commas" >&2
   echo "    -t include toasts" >&2
   echo "    -o order by column (default: 3 DESC / total size)" >&2
+  echo
+  echo " postgres user taken from \$PGUSER ($PGUSER)"
   exit 1
 }
 
 limit=20
 order="PSUT.schemaname, PSUT.relname"
 where=""
+# currently only returning tables.
 relkind="'r'"
 
-while getopts "cfhil:rvtoe" opt ; do
+while getopts "chil:trvfeo" opt ; do
   case $opt in
     c) commas="\pset numericlocale" ;;
     h) usage ;;
     i) relkind="$relkind, 'i'" ;;
     l) limit=$OPTARG ;;
     t) relkind="$relkind, 't'" ;;
-    r) order="PSUT.reltuples DESC" ;;
+    r) order="C.reltuples DESC" ;;
     v) vacuum='vacuum full;' ;;
-    f) full="true" ;;
+# not sure what this is expected to do
+#    f) full="true" ;;
     e) where="${where} AND C.reltuples > 0" ;;
     o) order=$OPTARG ;;
     \?) echo "Invalid option: -$OPTARG" >&2 ;;
@@ -42,11 +46,11 @@ done
 shift $((OPTIND-1))
 
 # assuming PGUSER is set
-# thinking probably want 
+# thinking probably want to require this
 dbname="$1"
 export PGDATABASE="${dbname:-postgres}"
 
-where="${where} AND relkind in ($relkind)"
+where="${where} AND C.relkind in ($relkind)"
 
 if [ $# -gt 1 ] ; then # has tablename
   where="${where} AND PSUT.relname like '%${2}%'"
@@ -56,6 +60,7 @@ fi
 ###
 
 if [ -z "${dbname}" ] ; then
+  # NOTE: pg_stat_all_tables vs pg_stat_all_users
   psql << SQL
     ${commas}
     SELECT PSUT.schemaname, PSUT.relname, PSUT.last_autovacuum, PSUT.last_autoanalyze
@@ -100,15 +105,15 @@ SELECT
     ELSE ''
     END AS expect_av
 FROM
-    -- pg_stat_all_tables PSUT
-    pg_stat_user_tables PSUT
+    pg_stat_all_tables PSUT
+    -- pg_stat_user_tables PSUT
     JOIN pg_class C
         ON PSUT.relid = C.oid
     JOIN rel_set RS
         ON PSUT.relid = RS.oid
 WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
 ${where}
-ORDER BY C.reltuples DESC
+ORDER BY ${order}
 LIMIT ${limit};
 SQL
 fi
