@@ -1,5 +1,0 @@
-if [ $# -ne 0 ] ; then
-  drutil "$@"
-else
-  drutil tray eject
-fi
