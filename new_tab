@@ -8,26 +8,32 @@
 # new_tab -t 'sc' -p -c -e './script/console'
 # new_tab -t 'psql' -p -c -e './script/dbconsole'
 
+# see also: https://iterm2.com/documentation-scripting.html
+# https://apple.stackexchange.com/questions/286943/how-do-i-write-a-script-that-opens-an-iterm2-window-and-runs-a-command
+
 function silent_osa() {
   osascript -l AppleScript -e "${*:?need osa command}" > /dev/null
 }
 function term_to_front() {
-  silent_osa 'Tell application "Terminal" to activate'
+  silent_osa 'Tell application "iTerm2" to activate'
 }
 function term_cmd() {
-  silent_osa 'Tell application "Terminal" to do script with command "'${1:?need terminal command}'" in selected tab of the front window'
+  # silent_osa 'Tell application "iTerm2" to do script with command "'${1:?need terminal command}'" in selected tab of the front window'
+  # silent_osa 'Tell application "iTerm2" to write text "'${1:?need terminal command}'" in current tab of the front window'
+  silent_osa 'Tell application "iTerm2" to write text "'${1:?need terminal command}'" in current session of the current window'
 }
 
-function finder_pwd() {
-  osascript -l AppleScript -e 'tell application "Finder" to return POSIX path of ((folder of the front window) as text)'  
+# function finder_pwd() {
+#   osascript -l AppleScript -e 'tell application "Finder" to return POSIX path of ((folder of the front window) as text)'  
+# }
+
+function term_key() { # working
+  silent_osa 'tell application "System Events" to tell process "iTerm2" to keystroke "'$1'" using command down'
 }
 
-function term_key() {
-  silent_osa 'tell application "System Events" to tell process "Terminal" to keystroke "'$1'" using command down'
-}
-
-function term_title {
-  term_cmd "echo -e '\\\033];${1:?need a title}\\\007'"
+function term_title { # not working
+  term_cmd "title: ${1}"
+#  term_cmd "echo -e '\\\033];${1:?need a title}\\\007'"
 }
 
 function usage() {
@@ -43,7 +49,7 @@ function usage() {
 }
 
 term_to_front
-while getopts "hn:t:d:e:fpc" opt ; do
+while getopts "hn:t:d:e:fpck:T:" opt ; do
   case $opt in
     h) usage ; exit 1 ;;
     n) term_key 'n' ; term_title "${OPTARG}" ;;
@@ -51,8 +57,10 @@ while getopts "hn:t:d:e:fpc" opt ; do
     d) term_cmd "cd ${OPTARG}" ;;
     p) term_cmd "cd '$(pwd)'" ;;
     c) term_key 'k' ;; #term_cmd "clear" ;;
+    k) term_key "${OPTARG}" ;;
     f) term_cmd "cd '$(finder_pwd)'" ;;
     e) term_cmd "${OPTARG}" ;;
+    T) term_title "${OPTARG}" ;;
     \?) echo "Invalid option: -$OPTARG" >&2 ;;
   esac
 done
