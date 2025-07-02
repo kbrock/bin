@@ -1,0 +1,25 @@
+#!/bin/bash
+
+# think this watches a file
+
+# usage:
+#   kwatch rake file
+#   kwatch -f file echo "the file named file just changed"
+
+if [[ $1 = "-f" ]] ; then
+  src=$2
+  shift ; shift
+else
+  src=$1
+fi
+
+while true ; do
+  ATIME=$(stat -f %m ${src})
+  [[ -z $LTIME ]] && LTIME=$ATIME
+  if [[ "$ATIME" != "$LTIME" ]]; then
+    echo "---"
+    ${@}
+    LTIME=$ATIME
+  fi
+  sleep 2
+done
