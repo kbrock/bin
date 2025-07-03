@@ -1,0 +1,1 @@
+for i in $(psql -l |grep vmdb_development | awk '{print $1}') ; do psql $i -c "select '$i',count(*) from relationships;" -XtAF, ; done
