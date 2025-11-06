@@ -2,7 +2,7 @@
 
 
 # add database name into your git config file
-# so it takes that database name instead of defaulting to the branch 
+# so it takes that database name instead of defaulting to the branch
 
 class GitDb
   # hack - need a better way
@@ -37,6 +37,8 @@ class GitDb
     # set suffix to the branch name
     when "-b", "--branch"
       @new_suffix = "_#{branchname.gsub(".","_")}"
+    when "-h", "--help"
+      @mode = :help
     else
       #@new_suffix = "_#{option}".gsub(/^.*_(?:development|test)/, '').gsub(/^__+/,'_')
       @new_suffix = "_#{option}".gsub(/^#{BASENAME}(?:development|test)/, '').gsub(/^__+/,'_')
@@ -70,6 +72,18 @@ class GitDb
       puts dbname
     when :suffix
       puts new_suffix
+    when :help
+      puts "usage: git db [options] db_name"
+      puts
+      puts "options:"
+      puts "   --branch   -b  set suffix to branch name"
+      puts "   --clear    -X  clear suffix"
+      puts
+      puts "   --verbose  -v  verbose mode (default)"
+      puts
+      puts "   --database -d  show database name"
+      puts "   --suffix   -s  show suffix"
+      puts "   --help     -h  show help"
     end
 
     if test
