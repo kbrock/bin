@@ -1,4 +1,0 @@
-
-echo "create keyspace ${1:-please provide keyspace} with placement_strategy='org.apache.cassandra.locator.SimpleStrategy' AND strategy_options={replication_factor:1};" | cassandra-cli -B -v 
-#echo "CREATE KEYSPACE ${0:-please provide keyspace} WITH strategy_class = 'SimpleStrategy' AND strategy_options:replication_factor='2';" | cqlsh -h localhost
-echo ""
