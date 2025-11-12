@@ -19,7 +19,6 @@ class VmdbTool
 
   class DatabaseYml
     # rails_root?
-    attr_accessor :filename # filename of the yaml file
     attr_accessor :env      # rails environment
 
     attr_accessor :hostname
@@ -28,15 +27,17 @@ class VmdbTool
     attr_accessor :password
 
     def initialize
-      @user = ENV["PGUSER"] || "root"
-      @pass = ENV["PGPASSWORD"] || "smartvm"
+      @env = "development"
+      @user = "root"
+      @pass = "smartvm"
       @db = "vmdb_database"
     end
 
+    # NOTE: env=development.main uses the main database for env development
     def load(fn = filename)
       return unless fn && env
       hash = YAML.load(ERB.new(File.read(fn)).result)
-      hash[env].each { |n, v| public_send("#{n}=", v) if respond_to?("#{n}=") }
+      hash.dig(env.split(".")).each { |n, v| public_send("#{n}=", v) if respond_to?("#{n}=") }
     end
   end
 
@@ -58,11 +59,12 @@ class VmdbTool
     def initialize(opts, model, env)
       @opts  = opts
       @model = model
-      @env   = env # not thrilled, but will do or now
+      @env   = env || {}# not thrilled, but will do or now
     end
 
-    def opt(attr_name, env_name, *args, &block)
+    def opt(attr_name, *args, &block)
       block ||= lambda { |v| @model.send("#{attr_name}=", v) } # allow custom setters
+      env_name = args.shift if args.first.nil? || !args.first.start_with?("-")
       if env_name && (value = @env[env_name])
         block.call(value) # default to ENV[] value
       end
@@ -73,36 +75,34 @@ class VmdbTool
     end
   end
 
-  def opt(opts, model, env)
+  def model(opts, model, env=ENV)
+    opts.separator "" # print a blank space between models
     yield OptSetter.new(opts, model, env)
   end
 
   def parse(env, argv)
-    db_yml.env = "development"
-    options = OptionParser.new do |opts|
+    OptionParser.new do |opts|
       opts.program_name = "vmdb"
       opts.version = "0.0.1"
-      opts.banner = "Usage: vmdb [options] action"
-      opt(opts, self, env) do |o|
-        o.opt(:verbose, "VERBOSE", "-v", "--verbose", "--[no-]verbose", "Run verbosely")
-        o.opt(:dry_run,       nil, "--dry-run", "Dry run (do not run)")
+      opts.banner = "Usage: #{opts.program_name} [options] action"
+      opts.separator "Actions: #{ACTIONS.join(", ")}"
+      model(opts, self, env) do |o|
+        o.opt(:verbose,  "VERBOSE",    "-v", "--verbose", "--[no-]verbose", "Run verbosely")
+        o.opt(:dry_run,                "--dry-run", "Dry run (do not run)")
       end
-      opt(opts, db_yml, env) do |o|
-        o.opt(:env, "RAILS_ENV", "-e STRING", "--env STRING", "Rails env for yml file")
-        o.opt(nil, nil, "-y STRING", "--yml STRING", "database.yaml configuration file") do |filename|
-          db_yml.load(filename)
-        end
-        o.opt(:hostname, "PGHOST", "-h STRING", "--host STRING", "Database host")
-        o.opt(:username, "PGUSER", "-U STRING", "--username STRING", "Postgres user")
+      model(opts, db_yml, env) do |o|
+        o.opt(:env,      "RAILS_ENV",  "-e STRING", "--env STRING", "Rails env for yml file")
+        o.opt(nil,                     "-y STRING", "--yml STRING", "database.yaml configuration file") { |filename| db_yml.load(filename) }
+        o.opt(:hostname, "PGHOST",     "-h STRING", "--host STRING", "Database host")
+        o.opt(:username, "PGUSER",     "-U STRING", "--username STRING", "Postgres user")
         o.opt(:database, "PGDATABASE", "-d STRING", "--dbname STRING", "Database name")
-        o.opt(:password, "PGPASSWORD", "-p STRING", "--password STRING", "Database name") # -W
+        o.opt(:password, "PGPASSWORD", "-p STRING", "--password STRING", "Database name") # use -W instead?
       end
-      opt(opts, db_opts, env) do |o|
-        o.opt(:threads, nil, "-j STRING", Integer, "number of threads for dump and load")
-        o.opt(:filename, nil, "-f STRING", "--file STRING", "filename for database backup")
+      model(opts, db_opts, env) do |o|
+        o.opt(:threads,                "-j NUM", Integer, "number of threads for dump and load")
+        o.opt(:filename,               "-f STRING", "--file STRING", "filename for database backup")
       end
-    end
-    options.parse!(argv)
+    end.parse!(argv)
     self.actions = argv
     self
   end
@@ -118,7 +118,7 @@ class VmdbTool
         STDERR.puts("for action #{action}, please specify #{key}")
       end
     end
-    exit 1 if failed
+    failed
   end
 
   # execution
@@ -142,25 +142,23 @@ class VmdbTool
       when "stop"
         server.stop
       when "dump"
-        fail = 
+        fail =
           requires(action, db_yml, :username, :database, db_opts, :filename) ||
           tools.pg_dump(db_yml, db_opts) ||
           fail
       when "load"
-        fail = 
+        fail =
           requires(action, db_yml, :username, :database, db_opts, :filename) ||
           tools.pg_restore(db_yml, db_opts) ||
           fail
-      when "region"
-        # fail =
-        #   requires(action, db_yaml)
       when "workers"
      else
         puts "unknown action: #{action}"
         fail = true
       end
     end
-    exit 1 if fail
+    exit fail if fail && __FILE__ == $0
+    fail
   end
 
   def launch(*cmd)
@@ -182,7 +180,7 @@ class VmdbTool
       add_flag(args, "-j", opts.threads)
       args.push(db.database)
       VmdbTool.launch(*args)
-      false
+      false # succeeded
     end
 
     def pg_restore(db, opts)
@@ -194,7 +192,7 @@ class VmdbTool
       add_flag(args, "-j", opts.threads)
       args.push(opts.filename)
       VmdbTool.launch(*args)
-      false
+      false # succeeded
     end
 
     private
@@ -234,4 +232,6 @@ class VmdbTool
   end
 end
 
-VmdbTool.instance.parse(ENV, ARGV).run
+if __FILE__ == $0
+  VmdbTool.instance.parse(ENV, ARGV).run
+end
