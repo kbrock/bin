@@ -1,8 +1,0 @@
-#!/usr/bin/env bash
-
-if [ $# -ne 2 ] ; then
-  echo "Usage: $(basename $0) old new"
-  exit 1
-fi
-echo "copying database $1 to $2"
-createdb -O ${PGUSER:-root} -T $1 $2

@@ -1,3 +1,0 @@
-# vmdb ui:update refresh
-# run from ui-classic
-bin/webpack --watch --follow
