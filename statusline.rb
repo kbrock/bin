@@ -10,6 +10,7 @@ require 'date'
 #                last API request when the transcript can't be read.
 #                ▲ blue/red = the turn's first send hit/missed the cache
 #                (tool round-trips are seconds apart, so they're always warm)
+#   ⚒count       tool calls this turn (0 when the transcript can't be read)
 #   $cost        session API cost (not real billing on subscription)
 #   ctx          context size; none/blue/yellow/red = model-degradation risk,
 #                bold red = 85% of context window (compaction imminent)
@@ -160,7 +161,7 @@ end
 # Only the tail is read: the statusline re-runs often and transcripts grow large
 TRANSCRIPT_TAIL = 4 * 1024 * 1024
 
-# {up:, down:, warm:} summed over every API request for the current prompt;
+# {up:, down:, warm:, tools:} summed over every API request for the current prompt;
 # nil if the transcript or this prompt's first send isn't found.
 def turn_usage(data)
   path, pid = data['transcript_path'], data['prompt_id']
@@ -170,12 +171,16 @@ def turn_usage(data)
     f.seek([f.size - TRANSCRIPT_TAIL, 0].max)
     f.read.lines
   end
-  seen, cur, turn = {}, nil, nil
+  seen, tools, cur, turn = {}, {}, nil, nil
   lines.each do |l|
     j = JSON.parse(l) rescue next # first line may be cut off by the seek
     next if j['isSidechain']
     cur = j['promptId'] if j['type'] == 'user' && j['promptId']
     next unless cur == pid && j['type'] == 'assistant'
+    # each entry holds one content block, so count tools before the dedupe
+    (j.dig('message', 'content') || []).each do |b|
+      tools[b['id']] = true if b['type'] == 'tool_use'
+    end
     u = j.dig('message', 'usage')
     id = j.dig('message', 'id')
     next if !u || seen[id] # one response can span several entries
@@ -185,10 +190,10 @@ def turn_usage(data)
     turn[:up]   += dig_i(u, 'input_tokens') + dig_i(u, 'cache_creation_input_tokens')
     turn[:down] += dig_i(u, 'output_tokens')
   end
-  turn
+  turn&.merge(tools: tools.size)
 end
 
-# ▲▼ $  │  ctx — these share tokens, so they're built together
+# ▲▼⚒ $  │  ctx — these share tokens, so they're built together
 # ▲ blue = turn's first send hit a warm cache, red = cold (paid full price to re-send)
 def usage_str(data, warm)
   cw = data['context_window'] || {}
@@ -198,9 +203,9 @@ def usage_str(data, warm)
   turn_in    = dig_i(cw, 'total_input_tokens')
   turn_out   = dig_i(cw, 'total_output_tokens')
   if (turn = turn_usage(data))
-    tool_in, down, warm = turn[:up], turn[:down], turn[:warm]
+    tool_in, down, warm, tools = turn[:up], turn[:down], turn[:warm], turn[:tools]
   else
-    down = turn_out
+    down, tools = turn_out, 0
   end
   ctx_max    = dig_i(cw, 'context_window_size')
   cost       = dig_f(data, 'cost', 'total_cost_usd')
@@ -211,7 +216,7 @@ def usage_str(data, warm)
   ctx_str  = paint(ctx_color(ctx, model_name, ctx_max), "ctx #{FMT[ctx]}")
   up_str   = paint(warm.nil? ? '' : warm ? BLUE : RED, "▲#{FMT[tool_in]}")
   down_str = paint(PURPLE, "▼#{FMT[down]}")
-  "#{up_str}  #{down_str} | $#{format('%.2f', cost)}  │  #{ctx_str}"
+  "#{up_str}  #{down_str}  ⚒#{tools} | $#{format('%.2f', cost)}  │  #{ctx_str}"
 end
 
 # [warm, expires_at]; nil when there is no cache

@@ -349,7 +349,17 @@ class StatuslineTest < Minitest::Test
       prompt('p1'), reply('m3', 700, 45_300, 50)
     )
     turn = turn_usage('transcript_path' => path, 'prompt_id' => 'p1')
-    assert_equal({ up: 6_006, down: 350, warm: true }, turn)
+    assert_equal({ up: 6_006, down: 350, warm: true, tools: 0 }, turn)
+  end
+
+  def test_turn_usage_counts_tool_calls_across_split_entries
+    call = ->(id, tool) { reply(id, 1, 1, 1).tap { |r| r['message']['content'] = [{ 'type' => 'tool_use', 'id' => tool }] } }
+    path = transcript(
+      prompt('p1'), call['m1', 't1'], call['m1', 't2'],        # two parallel calls in one response
+      prompt('p1'), call['m2', 't3'], call['m2', 't3'],        # duplicate entry of the same call
+      prompt('p1'), reply('m3', 1, 1, 1)                        # final answer, no tools
+    )
+    assert_equal 3, turn_usage('transcript_path' => path, 'prompt_id' => 'p1')[:tools]
   end
 
   def test_turn_usage_counts_a_response_split_over_entries_once
@@ -364,7 +374,7 @@ class StatuslineTest < Minitest::Test
       prompt('p1', sidechain: true), reply('m2', 8_000, 0, 800).merge('isSidechain' => true),
       prompt('p2'), reply('m3', 7_000, 0, 700)
     )
-    assert_equal({ up: 302, down: 100, warm: true }, turn_usage('transcript_path' => path, 'prompt_id' => 'p1'))
+    assert_equal({ up: 302, down: 100, warm: true, tools: 0 }, turn_usage('transcript_path' => path, 'prompt_id' => 'p1'))
   end
 
   def test_turn_usage_cold_first_send_is_not_masked_by_warm_tool_calls
@@ -399,7 +409,7 @@ class StatuslineTest < Minitest::Test
     }
     out = render(data)
     assert_includes out, "#{RED}▲40.5k"
-    assert_includes out, "▼300"
+    assert_includes out, "▼300#{RESET}  ⚒0"
   end
 
   def test_render_falls_back_to_last_request_without_transcript
@@ -413,6 +423,6 @@ class StatuslineTest < Minitest::Test
     }
     out = render(data)
     assert_includes out, "▲500"
-    assert_includes out, "▼200"
+    assert_includes out, "▼200#{RESET}  ⚒0"
   end
 end
