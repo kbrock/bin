@@ -1,8 +1,18 @@
 #!/usr/bin/env ruby
 require 'minitest/autorun'
+require 'minitest/mock'
+require 'tempfile'
 require_relative 'statusline'
 
 class StatuslineTest < Minitest::Test
+  # 7d pace coloring depends on the day, so rate-limit tests pin the clock.
+  # Monday 11am with a 5d22h reset: the window started Sunday 9am, so one
+  # weekday half-day has passed (10% allowance) and 5% is on pace (uncolored).
+  def on_pace_monday
+    now = Time.local(2026, 9, 28, 11)
+    Time.stub(:now, now) { yield now.to_i }
+  end
+
   # --- model_level: Sonnet (80k / 200k / 400k) ---
   def test_sonnet_good
     assert_equal 0, model_level(50_000, 'Claude Sonnet 5')
@@ -130,11 +140,13 @@ class StatuslineTest < Minitest::Test
 
   # --- rate_limit_str: normal (both under 100%) shows countdown-as-label ---
   def test_rate_limit_shows_both_when_neither_maxed
-    data = { 'rate_limits' => {
-      'five_hour' => { 'used_percentage' => 42, 'resets_at' => Time.now.to_i + 4 * 3_600 + 56 * 60 },
-      'seven_day' => { 'used_percentage' => 5, 'resets_at' => Time.now.to_i + 5 * 86_400 + 22 * 3_600 },
-    } }
-    assert_equal '5h 42%  6d 5%', rate_limit_str(data)
+    on_pace_monday do |now|
+      data = { 'rate_limits' => {
+        'five_hour' => { 'used_percentage' => 42, 'resets_at' => now + 4 * 3_600 + 56 * 60 },
+        'seven_day' => { 'used_percentage' => 5, 'resets_at' => now + 5 * 86_400 + 22 * 3_600 },
+      } }
+      assert_equal '5h 42%  6d 5%', rate_limit_str(data)
+    end
   end
 
   def test_rate_limit_nil_when_no_rate_limits_present
@@ -187,20 +199,6 @@ class StatuslineTest < Minitest::Test
     assert_includes out, '⛃'
   end
 
-  # --- render: hist:turn actually reflects the dragged-history ratio ---
-  def test_render_hist_turn_ratio_math
-    # ctx (turn_in+turn_out) = 10_000; turn (tool_in+turn_out) = 300 -> (10000-300)/300 = 32 (floor)
-    data = {
-      'context_window' => {
-        'current_usage' => { 'cache_creation_input_tokens' => 100, 'cache_read_input_tokens' => 9_700 },
-        'total_input_tokens' => 9_800, 'total_output_tokens' => 200, 'context_window_size' => 1_000_000
-      },
-      'cost' => { 'total_cost_usd' => 0.42 },
-      'model' => { 'display_name' => 'Claude Sonnet 5' }
-    }
-    assert_includes render(data), "hist:turn #{RED}32:1#{RESET}"
-  end
-
   # --- render: cache hit/miss coloring ---
   def test_render_cache_hit_is_blue
     data = {
@@ -228,8 +226,9 @@ class StatuslineTest < Minitest::Test
       'prompt_cache' => { 'warm' => false, 'expires_at' => Time.now.to_i + 300 }
     }
     out = render(data)
-    assert_includes out, "#{RED}⛃"
-    refute_includes out, "#{BOLD_RED}⛃"
+    assert_includes out, "#{RED}▲4.0k"
+    refute_includes out, "#{BOLD_RED}▲"
+    assert_includes out, "#{BLUE}⛃" # ⛃ is colored by expiry time, not by the miss
   end
 
   def test_render_cache_color_falls_back_to_token_heuristic_without_warm_key
@@ -289,19 +288,21 @@ class StatuslineTest < Minitest::Test
 
   # --- render: rate limits end-to-end, including the API-maxed collapse ---
   def test_render_includes_rate_limits
-    data = {
-      'context_window' => {
-        'current_usage' => { 'cache_creation_input_tokens' => 200, 'cache_read_input_tokens' => 5000 },
-        'total_input_tokens' => 5210, 'total_output_tokens' => 300, 'context_window_size' => 1_000_000
-      },
-      'cost' => { 'total_cost_usd' => 0.42 },
-      'model' => { 'display_name' => 'Claude Sonnet 5' },
-      'rate_limits' => {
-        'five_hour' => { 'used_percentage' => 42, 'resets_at' => Time.now.to_i + 4 * 3_600 + 56 * 60 },
-        'seven_day' => { 'used_percentage' => 5, 'resets_at' => Time.now.to_i + 5 * 86_400 + 22 * 3_600 },
+    on_pace_monday do |now|
+      data = {
+        'context_window' => {
+          'current_usage' => { 'cache_creation_input_tokens' => 200, 'cache_read_input_tokens' => 5000 },
+          'total_input_tokens' => 5210, 'total_output_tokens' => 300, 'context_window_size' => 1_000_000
+        },
+        'cost' => { 'total_cost_usd' => 0.42 },
+        'model' => { 'display_name' => 'Claude Sonnet 5' },
+        'rate_limits' => {
+          'five_hour' => { 'used_percentage' => 42, 'resets_at' => now + 4 * 3_600 + 56 * 60 },
+          'seven_day' => { 'used_percentage' => 5, 'resets_at' => now + 5 * 86_400 + 22 * 3_600 },
+        }
       }
-    }
-    assert_includes render(data), '5h 42%  6d 5%'
+      assert_includes render(data), '5h 42%  6d 5%'
+    end
   end
 
   def test_render_shows_api_when_seven_day_maxed
@@ -320,5 +321,98 @@ class StatuslineTest < Minitest::Test
     out = render(data)
     assert_includes out, 'API 9/27 10:40am'
     refute_includes out, '30%' # 5h percentage is dropped once 7d is the blocker
+  end
+
+  # --- turn_usage: ▲▼ summed over the whole turn from the transcript ---
+  def transcript(*entries)
+    f = Tempfile.new(['transcript', '.jsonl'])
+    entries.each { |e| f.puts(e.to_json) }
+    f.close
+    (@tempfiles ||= []) << f
+    f.path
+  end
+
+  def prompt(id, sidechain: false)
+    { 'type' => 'user', 'promptId' => id, 'isSidechain' => sidechain }
+  end
+
+  def reply(id, new_in, read, out, uncached: 2)
+    { 'type' => 'assistant', 'message' => { 'id' => id, 'usage' => {
+      'input_tokens' => uncached, 'cache_creation_input_tokens' => new_in,
+      'cache_read_input_tokens' => read, 'output_tokens' => out } } }
+  end
+
+  def test_turn_usage_sums_prompt_and_tool_round_trips
+    path = transcript(
+      prompt('p1'), reply('m1', 300, 40_000, 100),
+      prompt('p1'), reply('m2', 5_000, 40_300, 200), # tool result
+      prompt('p1'), reply('m3', 700, 45_300, 50)
+    )
+    turn = turn_usage('transcript_path' => path, 'prompt_id' => 'p1')
+    assert_equal({ up: 6_006, down: 350, warm: true }, turn)
+  end
+
+  def test_turn_usage_counts_a_response_split_over_entries_once
+    path = transcript(prompt('p1'), reply('m1', 300, 40_000, 100), reply('m1', 300, 40_000, 100))
+    assert_equal 302, turn_usage('transcript_path' => path, 'prompt_id' => 'p1')[:up]
+  end
+
+  def test_turn_usage_ignores_other_prompts_and_sidechains
+    path = transcript(
+      prompt('p0'), reply('m0', 9_000, 0, 900),
+      prompt('p1'), reply('m1', 300, 40_000, 100),
+      prompt('p1', sidechain: true), reply('m2', 8_000, 0, 800).merge('isSidechain' => true),
+      prompt('p2'), reply('m3', 7_000, 0, 700)
+    )
+    assert_equal({ up: 302, down: 100, warm: true }, turn_usage('transcript_path' => path, 'prompt_id' => 'p1'))
+  end
+
+  def test_turn_usage_cold_first_send_is_not_masked_by_warm_tool_calls
+    path = transcript(
+      prompt('p1'), reply('m1', 40_000, 0, 100),      # cache expired before the prompt
+      prompt('p1'), reply('m2', 500, 40_000, 200)     # tool round-trip seconds later: warm
+    )
+    refute turn_usage('transcript_path' => path, 'prompt_id' => 'p1')[:warm]
+  end
+
+  def test_turn_usage_nil_without_transcript_or_matching_prompt
+    assert_nil turn_usage({})
+    assert_nil turn_usage('transcript_path' => '/nonexistent.jsonl', 'prompt_id' => 'p1')
+    assert_nil turn_usage('transcript_path' => transcript(prompt('p0'), reply('m0', 1, 1, 1)), 'prompt_id' => 'p1')
+  end
+
+  def test_turn_usage_skips_line_cut_off_by_the_tail_seek
+    path = transcript(prompt('p1'), reply('m1', 300, 40_000, 100))
+    File.write(path, "{\"type\":\"assist\n" + File.read(path))
+    assert_equal 302, turn_usage('transcript_path' => path, 'prompt_id' => 'p1')[:up]
+  end
+
+  def test_render_uses_turn_totals_and_first_send_color
+    data = {
+      'context_window' => {
+        'current_usage' => { 'cache_creation_input_tokens' => 500, 'cache_read_input_tokens' => 40_000 },
+        'total_input_tokens' => 40_502, 'total_output_tokens' => 200, 'context_window_size' => 1_000_000
+      },
+      'model' => { 'display_name' => 'Claude Sonnet 5' },
+      'transcript_path' => transcript(prompt('p1'), reply('m1', 40_000, 0, 100), prompt('p1'), reply('m2', 500, 40_000, 200)),
+      'prompt_id' => 'p1'
+    }
+    out = render(data)
+    assert_includes out, "#{RED}▲40.5k"
+    assert_includes out, "▼300"
+  end
+
+  def test_render_falls_back_to_last_request_without_transcript
+    data = {
+      'context_window' => {
+        'current_usage' => { 'cache_creation_input_tokens' => 500, 'cache_read_input_tokens' => 40_000 },
+        'total_input_tokens' => 40_502, 'total_output_tokens' => 200, 'context_window_size' => 1_000_000
+      },
+      'model' => { 'display_name' => 'Claude Sonnet 5' },
+      'prompt_id' => 'p1'
+    }
+    out = render(data)
+    assert_includes out, "▲500"
+    assert_includes out, "▼200"
   end
 end
