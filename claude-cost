@@ -1,0 +1,126 @@
+#!/usr/bin/env ruby
+# Estimate Claude Code usage at API list prices from ~/.claude/projects/**/*.jsonl
+# usage: claude-cost [daily|weekly|monthly|model]
+require "json"
+require "date"
+require "set"
+
+# $ per 1M tokens: [input, output, cache_read]. Cache write: 5m = 1.25x input, 1h = 2x input.
+PRICES = {
+  "claude-fable-5"    => [10.0, 50.0, 0.25],
+  "claude-opus-5-5"   => [4.0, 20.0, 0.20],
+  "claude-opus-5"     => [5.0, 25.0, 0.50],
+  "claude-opus-4"     => [5.0, 25.0, 0.50],
+  "claude-sonnet-5"   => [2.0, 10.0, 0.20],
+  "claude-sonnet-4"   => [3.0, 15.0, 0.30],
+  "claude-haiku-5"    => [0.10, 0.50, 0.01],
+  "claude-haiku-4"    => [1.0, 5.0, 0.10],
+}.freeze
+
+def commas(n)
+  n.to_i.to_s.reverse.scan(/\d{1,3}/).join(",").reverse
+end
+
+# 3.4M, 10.2k, 950 (floored, like the statusline)
+def short(n)
+  n = n.to_i
+  if n >= 1_000_000 then format("%.1fM", (n / 100_000) / 10.0)
+  elsif n >= 1_000 then format("%.1fk", (n / 100) / 10.0)
+  else n.to_s
+  end
+end
+
+def money(x)
+  "$" + format("%.2f", x).sub(/(\d)(?=(\d{3})+\.)/, '\\1,')
+end
+
+def price_for(model)
+  PRICES.find { |k, _| model.start_with?(k) }&.last
+end
+
+BIG_CONTEXT = 200_000
+
+group = ARGV[0] || "monthly"
+seen = {}
+totals = Hash.new { |h, k| h[k] = Hash.new(0.0) }
+unknown = Hash.new(0)
+sessions = Hash.new { |h, k| h[k] = Set.new }
+
+Dir.glob(File.expand_path("~/.claude/projects/**/*.jsonl")).each do |path|
+  File.foreach(path) do |line|
+    next unless line.include?('"usage"')
+    rec = JSON.parse(line) rescue next
+    msg = rec["message"] or next
+    u = msg["usage"] or next
+    model = msg["model"].to_s
+    next if model.empty? || model == "<synthetic>"
+    key = "#{msg['id']}:#{rec['requestId']}"
+    next if seen[key]
+    seen[key] = true
+
+    p = price_for(model)
+    unless p
+      unknown[model] += 1
+      next
+    end
+    inp, out, read = p
+    cc = u["cache_creation"] || {}
+    w1h = cc["ephemeral_1h_input_tokens"].to_i
+    w5m = cc.key?("ephemeral_5m_input_tokens") ? cc["ephemeral_5m_input_tokens"].to_i : u["cache_creation_input_tokens"].to_i - w1h
+    cost = (u["input_tokens"].to_i * inp +
+            u["output_tokens"].to_i * out +
+            u["cache_read_input_tokens"].to_i * read +
+            w5m * inp * 1.25 + w1h * inp * 2.0) / 1_000_000.0
+
+    bucket = case group
+             when "daily" then rec["timestamp"].to_s[0, 10]
+             when "weekly" # bucket by the Monday that starts the week
+               day = Date.parse(rec["timestamp"].to_s[0, 10])
+               (day - (day.wday - 1) % 7).to_s
+             when "model" then model
+             else rec["timestamp"].to_s[0, 7]
+             end
+    read_tok = u["cache_read_input_tokens"].to_i
+    in_tok = u["input_tokens"].to_i + read_tok + w5m + w1h
+    t = totals[bucket]
+    t[:cost] += cost
+    t[:in] += in_tok
+    t[:out] += u["output_tokens"].to_i
+    t[:read] += read_tok
+    t[:w5m] += w5m
+    t[:w1h] += w1h
+    t[:big] += 1 if in_tok > BIG_CONTEXT
+    t[:calls] += 1
+    sessions[bucket] << rec["sessionId"]
+    sessions[:all] << rec["sessionId"]
+  end
+end
+
+# calls and tokens, then what the cache did, then cost.
+#   ctx    average input tokens per call (the context you send each time)
+#   hit    share of input tokens read from the cache; the rest was sent fresh or written
+#   writes tokens written to the cache, and what share of them were the 1h kind (2x price)
+#   >200k  share of calls whose context was over BIG_CONTEXT
+COLS = format("%8s %8s %7s %9s %9s %6s %9s %5s %7s %11s",
+              "calls", "sessions", "ctx", "input", "output", "hit", "writes", "1h", ">200k", "cost")
+puts format("%-26s %s", group, COLS)
+
+def row(label, t, n_sessions, bar = "")
+  writes = t[:w5m] + t[:w1h]
+  pct = ->(a, b) { b.positive? ? format("%.0f%%", a * 100.0 / b) : "-" }
+  format("%-26s %8s %8s %7s %9s %9s %6s %9s %5s %7s %11s  %s",
+         label, commas(t[:calls]), commas(n_sessions),
+         short(t[:calls].positive? ? t[:in] / t[:calls] : 0), short(t[:in]), short(t[:out]),
+         pct[t[:read], t[:in]], short(writes), pct[t[:w1h], writes],
+         pct[t[:big], t[:calls]], money(t[:cost]), bar)
+end
+
+grand = Hash.new(0.0)
+max_cost = totals.values.map { |t| t[:cost] }.max.to_f
+totals.sort.each do |k, t|
+  t.each { |f, v| grand[f] += v }
+  bar = max_cost.positive? ? "█" * (t[:cost] / max_cost * 20).round : ""
+  puts row(k, t, sessions[k].size, bar)
+end
+puts row("TOTAL", grand, sessions[:all].size)
+warn "unpriced models: #{unknown}" unless unknown.empty?
