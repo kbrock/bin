@@ -5,6 +5,20 @@ require 'tempfile'
 require_relative 'statusline'
 
 class StatuslineTest < Minitest::Test
+  # render picks a layout from COLUMNS: large (174+) unless a test says otherwise
+  def setup
+    @columns = ENV['COLUMNS']
+    ENV['COLUMNS'] = '200'
+  end
+
+  def teardown
+    ENV['COLUMNS'] = @columns
+  end
+
+  def plain(str)
+    str.gsub(ANSI, '')
+  end
+
   # 7d pace coloring depends on the day, so rate-limit tests pin the clock.
   # Monday 11am with a 5d22h reset: the window started Sunday 9am, so one
   # weekday half-day has passed (10% allowance) and 5% is on pace (uncolored).
@@ -80,8 +94,8 @@ class StatuslineTest < Minitest::Test
   end
 
   # --- ctx_color: physical overrides model, red never becomes bold on its own ---
-  def test_color_good_is_uncolored
-    assert_equal '', ctx_color(10_000, 'Claude Sonnet 5', 1_000_000)
+  def test_color_good_is_green
+    assert_equal GREEN, ctx_color(10_000, 'Claude Sonnet 5', 1_000_000)
   end
 
   def test_color_model_fried_is_plain_red_not_bold
@@ -145,7 +159,7 @@ class StatuslineTest < Minitest::Test
         'five_hour' => { 'used_percentage' => 42, 'resets_at' => now + 4 * 3_600 + 56 * 60 },
         'seven_day' => { 'used_percentage' => 5, 'resets_at' => now + 5 * 86_400 + 22 * 3_600 },
       } }
-      assert_equal '5h 42%  6d 5%', rate_limit_str(data)
+      assert_equal '◷ 5h 42%  ◷ 6d  5%', plain(rate_limit_str(data))
     end
   end
 
@@ -194,9 +208,9 @@ class StatuslineTest < Minitest::Test
       'prompt_cache' => { 'warm' => true, 'expires_at' => Time.now.to_i + 300 }
     }
     out = render(data)
-    assert_includes out, 'ctx'
+    assert_includes out, '▣'
     assert_includes out, '$0.42'
-    assert_includes out, '⛃'
+    assert_includes out, '⛁'
   end
 
   # --- render: cache hit/miss coloring ---
@@ -211,8 +225,8 @@ class StatuslineTest < Minitest::Test
       'prompt_cache' => { 'warm' => true, 'expires_at' => Time.now.to_i + 300 }
     }
     out = render(data)
-    assert_includes out, "#{BLUE}⛃"
-    refute_includes out, "#{RED}⛃"
+    assert_includes out, "#{BLUE}▲200"
+    refute_includes out, "#{RED}▲"
   end
 
   def test_render_cache_miss_is_plain_red_not_bold
@@ -228,7 +242,7 @@ class StatuslineTest < Minitest::Test
     out = render(data)
     assert_includes out, "#{RED}▲4.0k"
     refute_includes out, "#{BOLD_RED}▲"
-    assert_includes out, "#{BLUE}⛃" # ⛃ is colored by expiry time, not by the miss
+    assert_includes out, "⛁ #{GREEN}" # ⛁ is colored by expiry time, not by the miss
   end
 
   def test_render_cache_color_falls_back_to_token_heuristic_without_warm_key
@@ -244,7 +258,7 @@ class StatuslineTest < Minitest::Test
       'prompt_cache' => { 'expires_at' => Time.now.to_i + 300 }
     }
     out = render(data)
-    assert_includes out, "#{BLUE}⛃"
+    assert_includes out, "#{BLUE}▲200"
   end
 
   def test_render_shows_cache_expiry_as_clock_time
@@ -258,7 +272,7 @@ class StatuslineTest < Minitest::Test
       'model' => { 'display_name' => 'Claude Sonnet 5' },
       'prompt_cache' => { 'warm' => true, 'expires_at' => expires_at }
     }
-    assert_includes render(data), "⛃ #{FMT_CLOCK[expires_at, false]}"
+    assert_includes render(data), "⛁ #{GREEN}#{FMT_CLOCK[expires_at, false]}"
   end
 
   def test_render_shows_expired_when_cache_already_past
@@ -271,7 +285,10 @@ class StatuslineTest < Minitest::Test
       'model' => { 'display_name' => 'Claude Sonnet 5' },
       'prompt_cache' => { 'warm' => false, 'expires_at' => Time.now.to_i - 10 }
     }
-    assert_includes render(data), 'EXPIRED'
+    out = render(data)
+    assert_includes out, "#{RED}EXPIRED"
+    assert_includes out, "#{GREEN}▣" # the bar keeps its zone color; only the clock is red
+    refute_includes out, "#{RED}▰"
   end
 
   def test_render_omits_cache_line_when_absent
@@ -283,7 +300,7 @@ class StatuslineTest < Minitest::Test
       'cost' => { 'total_cost_usd' => 0.42 },
       'model' => { 'display_name' => 'Claude Sonnet 5' }
     }
-    refute_includes render(data), '⛃'
+    refute_includes render(data), '⛁'
   end
 
   # --- render: rate limits end-to-end, including the API-maxed collapse ---
@@ -301,7 +318,7 @@ class StatuslineTest < Minitest::Test
           'seven_day' => { 'used_percentage' => 5, 'resets_at' => now + 5 * 86_400 + 22 * 3_600 },
         }
       }
-      assert_includes render(data), '5h 42%  6d 5%'
+      assert_includes plain(render(data)), '◷ 5h  ▰▰▱▱▱  ◷ 6d  ▰▱▱▱▱'
     end
   end
 
@@ -408,8 +425,8 @@ class StatuslineTest < Minitest::Test
       'prompt_id' => 'p1'
     }
     out = render(data)
-    assert_includes out, "#{RED}▲40.5k"
-    assert_includes out, "▼300#{RESET}  ⚒0"
+    assert_includes out, "#{RED}▲40k"
+    assert_includes out, "▼300#{RESET} ⚒0"
   end
 
   def test_render_falls_back_to_last_request_without_transcript
@@ -423,6 +440,80 @@ class StatuslineTest < Minitest::Test
     }
     out = render(data)
     assert_includes out, "▲500"
-    assert_includes out, "▼200#{RESET}  ⚒0"
+    assert_includes out, "▼200#{RESET} ⚒0"
+  end
+
+  # --- layouts: chosen by COLUMNS alone ---
+  def layout_data
+    {
+      'context_window' => { 'total_input_tokens' => 210_000, 'context_window_size' => 1_000_000 },
+      'cost' => { 'total_cost_usd' => 1.5 },
+      'model' => { 'display_name' => 'Sonnet 5' },
+      'rate_limits' => {
+        'five_hour' => { 'used_percentage' => 40, 'resets_at' => Time.now.to_i + 7_000 },
+        'seven_day' => { 'used_percentage' => 20, 'resets_at' => Time.now.to_i + 200_000 },
+      }
+    }
+  end
+
+  def test_large_layout_shows_everything
+    ENV['COLUMNS'] = '174'
+    out = plain(render(layout_data))
+    assert_includes out, '▰▰▰▰▰▱▱▱▱▱▱▱ 210.0k'
+    assert_includes out, '▲0 ▼0 ⚒0'
+    assert_includes out, '$1.50'
+    assert_includes out, '⬢ Sonnet'
+    assert_equal 174 - RIGHT_MARGIN, out.length # right group is pushed to the edge
+  end
+
+  def test_medium_layout_has_bars_only
+    ENV['COLUMNS'] = '173'
+    out = plain(render(layout_data))
+    assert_includes out, '▣ ▰▰▰▰▰▱▱▱▱▱▱▱  ◷ 2h  ▰▰▱▱▱  ◷ 3d  ▰▱▱▱▱'
+    %w[210.0k ▲ ▼ ⚒ $1.50 ⬢].each { |hidden| refute_includes out, hidden }
+    assert out.length < 80, 'right group stays next to the left, not at the edge'
+  end
+
+  def test_medium_starts_at_82_columns
+    ENV['COLUMNS'] = '82'
+    assert_includes plain(render(layout_data)), '▰▰▰▰▰▱▱▱▱▱▱▱'
+  end
+
+  def test_small_layout_has_size_and_percentages_only
+    ENV['COLUMNS'] = '81'
+    out = plain(render(layout_data))
+    assert_includes out, '▣ 210.0k'
+    assert_includes out, '◷ 2h 40%  ◷ 3d 20%'
+    %w[▰ ▲ $1.50 ⬢].each { |hidden| refute_includes out, hidden }
+    assert_equal 81 - RIGHT_MARGIN, out.length
+  end
+
+  def test_small_percentage_spacing_follows_digit_count
+    ENV['COLUMNS'] = '81'
+    data = layout_data
+    data['rate_limits']['five_hour']['used_percentage'] = 5
+    assert_includes plain(render(data)), '◷ 2h  5%  ◷ 3d 20%'
+  end
+
+  def test_cost_and_model_are_muted
+    out = render(layout_data)
+    assert_includes out, "#{MUTED}$1.50#{RESET}"
+    assert_includes out, "#{MUTED}Sonnet#{RESET}"
+  end
+
+  # --- cache clock: green, turquoise under CACHE_LOW_SECS, red once expired ---
+  def test_cache_clock_turns_turquoise_under_two_minutes
+    soon = Time.now.to_i + 60
+    assert_includes cache_str(soon), "#{TURQUOISE}#{FMT_CLOCK[soon, false]}"
+  end
+
+  def test_cache_clock_is_green_with_time_left
+    later = Time.now.to_i + 600
+    assert_includes cache_str(later), "#{GREEN}#{FMT_CLOCK[later, false]}"
+  end
+
+  def test_ctx_icon_takes_the_zone_color
+    data = layout_data # 210k on Sonnet is the yellow zone
+    assert_includes render(data), "#{YELLOW}▣"
   end
 end

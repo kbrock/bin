@@ -35,8 +35,8 @@ require 'date'
 #                       ⚑ yellow stash, ↑ cyan unpushed or no upstream, ↓ cyan
 #                       behind, ✔ green in sync (ahead/behind as of the last fetch).
 #   ▣ ▰▰▱▱ 120.0k      context size. Green/blue/yellow/red = model-degradation
-#                       zones (model_zones); bold red = 85% of the context window;
-#                       red when the cache has expired. The bar (wide) is scaled to
+#                       zones (model_zones); bold red = 85% of the context window.
+#                       The bar (wide) is scaled to
 #                       the model's degraded size: Sonnet 10 slots of 40k, Opus 12
 #                       of 50k, plus RED_SLOTS past degraded. Each slot has its band's
 #                       color: solid once reached, hollow while ahead. The size takes
@@ -294,22 +294,21 @@ def ctx_slot_count(model_name)
 end
 
 # Every slot has the color of its band (the zone at the slot's start): solid
-# when ctx has reached it, hollow when it is still ahead. Solid slots turn red
-# when the cache has expired.
-def ctx_slots(ctx, model_name, expired)
+# when ctx has reached it, hollow when it is still ahead.
+def ctx_slots(ctx, model_name)
   count = ctx_slot_count(model_name)
   width = model_zones(model_name)[2].to_f / count
   count += RED_SLOTS # the red zone starts at degraded, so it needs slots of its own
   lit   = [(ctx / width).floor, count].min
   (1..count).map do |k|
     band = MODEL_COLORS[model_level(((k - 1) * width).to_i, model_name)]
-    k <= lit ? paint(expired ? RED : band, '▰') : paint(band, '▱')
+    k <= lit ? paint(band, '▰') : paint(band, '▱')
   end.join
 end
 
 SHOW_TURN = true
 
-def usage_str(data, warm, expired = false, wide = false, size = true, extras = true)
+def usage_str(data, warm, wide = false, size = true, extras = true)
   cw = data['context_window'] || {}
 
   turn_in    = dig_i(cw, 'total_input_tokens')
@@ -336,10 +335,10 @@ def usage_str(data, warm, expired = false, wide = false, size = true, extras = t
     turn_str = "#{up_str} #{down_str} ⚒#{tools}  "
   end
 
-  ctx_col  = expired ? RED : ctx_color(ctx, model_name, ctx_max)
+  ctx_col  = ctx_color(ctx, model_name, ctx_max)
   # the ▣ takes the size's color (so the 85% alert shows without the number)
   ctx_str  = paint(ctx_col, '▣')
-  ctx_str += " #{ctx_slots(ctx, model_name, expired)}" if wide
+  ctx_str += " #{ctx_slots(ctx, model_name)}" if wide
   ctx_str += paint(ctx_col, FMT_CTX[ctx]) if size
   # ▲▼⚒ sit just left of the cost
   [ctx_str, extras ? "#{turn_str}#{paint(MUTED, format('$%.2f', cost))}" : nil]
@@ -492,7 +491,7 @@ end
 # condensed: ✔ repo branch #pr  ▣ ctx ⛁ clock                   $cost  ◷ 5h ⣿⡏⠀⠀  ◷ 7d ⠇⠀⠀⠀  ⬢ model
 def layout(data, wide, size, extras)
   warm, expires_at = prompt_cache(data)
-  usage, cost = usage_str(data, warm, cache_expired?(expires_at), wide, size, extras)
+  usage, cost = usage_str(data, warm, wide, size, extras)
   ctx_clock = "#{usage} #{cache_str(expires_at)}".rstrip
   model     = "⬢ #{model_str(data)}"
   rates     = rate_limit_str(data, wide)
