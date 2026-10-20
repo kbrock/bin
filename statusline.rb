@@ -26,8 +26,8 @@ require 'date'
 #
 # One line: a left group and a right group, the right one pushed to the edge
 # using COLUMNS (minus RIGHT_MARGIN, which keeps clear of notifications).
-# Wide layout when it fits; otherwise narrow (no context bar, limits as %,
-# branch hidden on main/master and in worktrees).
+# Wide layout when it fits; then narrow; then narrow without $cost and model
+# (no context bar, limits as %, branch hidden on main/master and in worktrees).
 #
 #   ✔ [main] repo #22   one state symbol, [branch], repo (bold blue), PR number
 #                       (links to the PR). Branch is turquoise. The symbol is the
@@ -222,8 +222,9 @@ end
 def limit_bar(pct, resets, fallback, color, wide)
   label = FMT_LEFT[resets]
   label = fallback if label.empty?
-  used = wide ? limit_slots(pct) : format('%3s', "#{pct.round}%")
-  "◷ #{label.ljust(3)} #{paint(color, used)}"
+  # narrow: the % is right-aligned in 3 so "3h  5%" and "3d 42%" use one space for 2 digits
+  return "◷ #{label} #{paint(color, format('%3s', "#{pct.round}%"))}" unless wide
+  "◷ #{label.ljust(3)} #{paint(color, limit_slots(pct))}"
 end
 
 def rate_limit_str(data, wide = false)
@@ -308,7 +309,7 @@ end
 
 SHOW_TURN = true
 
-def usage_str(data, warm, expired = false, wide = false)
+def usage_str(data, warm, expired = false, wide = false, size = true, extras = true)
   cw = data['context_window'] || {}
 
   turn_in    = dig_i(cw, 'total_input_tokens')
@@ -322,7 +323,7 @@ def usage_str(data, warm, expired = false, wide = false)
   # Per-turn ▲▼⚒ took a while to tune: DO NOT DELETE. Set SHOW_TURN to false to
   # hide it (it also skips reading the transcript).
   turn_str = ''
-  if SHOW_TURN
+  if SHOW_TURN && extras
     cu      = cw['current_usage'] || {}
     tool_in = dig_i(cu, 'cache_creation_input_tokens')
     if (turn = turn_usage(data))
@@ -336,9 +337,12 @@ def usage_str(data, warm, expired = false, wide = false)
   end
 
   ctx_col  = expired ? RED : ctx_color(ctx, model_name, ctx_max)
-  ctx_str  = '▣' + (wide ? " #{ctx_slots(ctx, model_name, expired)}" : '') + paint(ctx_col, FMT_CTX[ctx])
+  # the ▣ takes the size's color (so the 85% alert shows without the number)
+  ctx_str  = paint(ctx_col, '▣')
+  ctx_str += " #{ctx_slots(ctx, model_name, expired)}" if wide
+  ctx_str += paint(ctx_col, FMT_CTX[ctx]) if size
   # ▲▼⚒ sit just left of the cost
-  [ctx_str, "#{turn_str}#{format('$%.2f', cost)}"]
+  [ctx_str, extras ? "#{turn_str}#{paint(MUTED, format('$%.2f', cost))}" : nil]
 end
 
 # [warm, expires_at]; nil when there is no cache
@@ -356,13 +360,17 @@ end
 
 CYAN, BOLD_BLUE, TURQUOISE = "\e[36m", "\e[1;34m", "\e[38;5;80m"
 
+# Quiet color for info that is never a warning ($cost, model name): plain text
+# draws the eye, and the zone colors (green/blue/yellow/red) must keep their meaning.
+MUTED = "\e[38;5;67m"
+
 EFFORT_ARROWS = { 'low' => '↓', 'medium' => '→', 'high' => '↑', 'xhigh' => '⇑', 'max' => '⇈' }.freeze
 EFFORT_COLORS = { 'high' => YELLOW, 'xhigh' => RED, 'max' => RED }.freeze
 
 # "Opus ⇑": model name without the version, then an arrow for effort
 # (colored when xhigh/max). Medium and models without effort get no arrow.
 def model_str(data)
-  name  = data.dig('model', 'display_name').to_s[/\A[A-Za-z]+/].to_s
+  name  = paint(MUTED, data.dig('model', 'display_name').to_s[/\A[A-Za-z]+/].to_s)
   level = data.dig('effort', 'level')
   return name if level.nil? || level == 'medium'
   "#{name} #{paint(EFFORT_COLORS.fetch(level, ''), EFFORT_ARROWS.fetch(level, level[0]))}"
@@ -465,32 +473,46 @@ def cache_expired?(expires_at)
   expires_at && expires_at <= Time.now.to_i
 end
 
+# Under this the clock turns turquoise: a nudge, not an alarm (the expiry keeps
+# getting pushed out, so yellow would fire too often)
+CACHE_LOW_SECS = 120
+
 # Sits right after ctx (▣ is the icon for both); red once the cache is gone
 def cache_str(expires_at)
   return nil unless expires_at
-  clock = cache_expired?(expires_at) ? paint(RED, 'EXPIRED') : paint(GREEN, FMT_CLOCK[expires_at, false])
+  clock = if cache_expired?(expires_at) then paint(RED, 'EXPIRED')
+          elsif expires_at - Time.now.to_i < CACHE_LOW_SECS then paint(TURQUOISE, FMT_CLOCK[expires_at, false])
+          else paint(GREEN, FMT_CLOCK[expires_at, false])
+          end
   "⛁ #{clock}"
 end
 
 # => [left, right]
 # wide:      ✔ [branch] repo #pr  ▣ ▰▱▱▱▱ ctx ⛁ clock          $cost  ◷ 5h ▰▱▱▱▱  ◷ 7d ▰▱▱▱▱  ⬢ model
 # condensed: ✔ repo branch #pr  ▣ ctx ⛁ clock                   $cost  ◷ 5h ⣿⡏⠀⠀  ◷ 7d ⠇⠀⠀⠀  ⬢ model
-def layout(data, wide)
+def layout(data, wide, size, extras)
   warm, expires_at = prompt_cache(data)
-  usage, cost = usage_str(data, warm, cache_expired?(expires_at), wide)
+  usage, cost = usage_str(data, warm, cache_expired?(expires_at), wide, size, extras)
   ctx_clock = "#{usage} #{cache_str(expires_at)}".rstrip
   model     = "⬢ #{model_str(data)}"
   rates     = rate_limit_str(data, wide)
 
-  [[git_str(data, wide), ctx_clock].compact.join('  '), [cost, rates, model].compact.join('  ')]
+  [[git_str(data, wide), ctx_clock].compact.join('  '), [[cost, rates].compact.join('  '), (model if extras)].compact.join('  ')]
 end
 
-# Wide when it fits COLUMNS, else condensed
+# Tried in order: [bars, ctx size, ▲▼⚒ $cost model]
+#   large:  bars + size + ▲▼⚒ $cost model
+#   medium: bars only
+#   small:  no bar, size only (nothing else)
+# The first layout whose minimum COLUMNS is met wins; the width is the only rule.
+# last flag: push the right group to the edge (medium keeps it next to the left group)
+LAYOUTS = [[true, true, true, 174, true], [true, false, false, 82, false], [false, true, false, 0, true]].freeze
+
 def render(data)
-  left, right = layout(data, true)
-  fits = visible_len(left) + 2 + visible_len(right) <= ENV['COLUMNS'].to_i - RIGHT_MARGIN
-  left, right = layout(data, false) unless fits
-  justify(left, right)
+  columns = ENV['COLUMNS'].to_i
+  wide, size, extras, _, edge = LAYOUTS.find { |_, _, _, min_columns, _| columns >= min_columns }
+  left, right = layout(data, wide, size, extras)
+  edge ? justify(left, right) : "#{left}  #{right}"
 end
 
 if __FILE__ == $0
