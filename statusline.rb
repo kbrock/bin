@@ -69,20 +69,21 @@ end
 MODEL_COLORS = ['', BLUE, YELLOW, RED].freeze
 
 # Reasoning-quality zone by model. Sonnet 5.5 vs Opus 5.5
-def model_level(ctx, model_name)
-  name = model_name.to_s.downcase
+def model_zones(model_name)
+  case model_name.to_s.downcase
+  when /opus/i
+    [150_000, 350_000, 600_000]
+  when /sonnet/i
+    [80_000, 200_000, 400_000]
+  when /qwen.*coder/i
+    [24_000, 45_000, 85_000]
+  else
+    [32_000, 80_000, 150_000] # Fallback
+  end
+end
 
-  good_max, multi_hop, degraded =
-    case name
-    when /opus/i
-      [150_000, 350_000, 600_000]
-    when /sonnet/i
-      [80_000, 200_000, 400_000]
-    when /qwen.*coder/i
-      [24_000, 45_000, 85_000]
-    else
-      [32_000, 80_000, 150_000] # Fallback
-    end
+def model_level(ctx, model_name)
+  good_max, multi_hop, degraded = model_zones(model_name)
 
   return 3 if ctx >= degraded
   return 2 if ctx >= multi_hop
