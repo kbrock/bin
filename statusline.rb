@@ -29,7 +29,17 @@ def dig_f(h, *path)
   (h.dig(*path) || 0).to_f
 end
 
-FMT = ->(n) { n >= 1000 ? format('%.1fk', n / 1000.0) : n.to_s }
+# ▲▼ tokens are at most 4 chars. Floored, not rounded, so 9999 stays "9.9k".
+# ctx is padded to a fixed width so the line doesn't jitter.
+FMT_TOKENS = ->(n) {
+  s = if n >= 1_000_000 then format('%.1fM', (n / 100_000) / 10.0)
+      elsif n >= 10_000 then "#{n / 1000}k"
+      elsif n >= 1_000  then format('%.1fk', (n / 100) / 10.0)
+      else n.to_s
+      end
+  s
+}
+FMT_CTX = ->(n) { (n >= 1000 ? format('%.1fk', n / 1000.0) : n.to_s).rjust(7) }
 
 # Single unit, 5h22m -> "6h", not
 # This label doubles as the rate-limit's name (see rate_limit_str)
@@ -66,7 +76,7 @@ def color_limits(v, str, yellow, red, low = '')
   paint(v >= red ? RED : v >= yellow ? YELLOW : low, str)
 end
 
-MODEL_COLORS = ['', BLUE, YELLOW, RED].freeze
+MODEL_COLORS = [GREEN, BLUE, YELLOW, RED].freeze
 
 # Reasoning-quality zone by model. Sonnet 5.5 vs Opus 5.5
 def model_zones(model_name)
@@ -129,19 +139,51 @@ def seven_day_allowance(resets_at)
   [halves * 10, 100].min
 end
 
-# purple = ahead of pace, green = 2+ half-days behind
-def seven_day_color(pct, resets_at)
-  allowance = seven_day_allowance(resets_at)
-  pct > allowance ? PURPLE : pct < allowance - 20 ? GREEN : ''
+WALL = 90 # % used where a limit turns red regardless of pace
+
+TEAL = "\e[38;5;37m"
+
+# teal = too low (idle capacity), green = on pace, purple = too high, red = near the wall.
+# behind/ahead are how many points off pace counts as too low/too high.
+def pace_color(pct, pace, behind, ahead)
+  return RED if pct >= WALL
+  pct < pace - behind ? TEAL : pct > pace + ahead ? PURPLE : GREEN
 end
 
-def limit_label(pct, resets, fallback)
+# pace is the weekday half-day allowance (see seven_day_allowance)
+def seven_day_color(pct, resets_at)
+  return GREEN unless resets_at
+  pace_color(pct, seven_day_allowance(resets_at), 20, 10)
+end
+
+# pace is linear: the share of the window already elapsed
+def five_hour_color(pct, resets_at)
+  return GREEN unless resets_at
+  elapsed = (1 - (resets_at - Time.now.to_i) / 18_000.0).clamp(0, 1) * 100
+  pace_color(pct, elapsed, 10, 10)
+end
+
+def slots_bar(filled, total = 5)
+  '▰' * filled + '▱' * (total - filled)
+end
+
+# 5 slots, 20% each; any use shows at least one, full only at 100%
+def limit_slots(pct)
+  filled = (pct / 20.0).round
+  filled = [filled, 1].max if pct > 0
+  filled = [filled, 4].min if pct < 100
+  slots_bar([filled, 5].min)
+end
+
+# time left, then % used as a bar (wide) or a number (narrow), in the pace color
+def limit_bar(pct, resets, fallback, color, wide)
   label = FMT_LEFT[resets]
   label = fallback if label.empty?
-  "#{label} #{pct.round}%"
+  used = wide ? limit_slots(pct) : format('%3s', "#{pct.round}%")
+  "◷ #{label.ljust(3)} #{paint(color, used)}"
 end
 
-def rate_limit_str(data)
+def rate_limit_str(data, wide = false)
   return nil unless data['rate_limits'] # no subscription limits (API key)
   five_pct,  five_resets  = limit_window(data, 'five_hour')
   seven_pct, seven_resets = limit_window(data, 'seven_day')
@@ -155,8 +197,8 @@ def rate_limit_str(data)
     return paint(RED, "API #{clock}")
   end
 
-  seven_str = paint(seven_day_color(seven_pct, seven_resets), limit_label(seven_pct, seven_resets, '7d'))
-  "#{limit_label(five_pct, five_resets, '5h')}  #{seven_str}"
+  seven_color = seven_day_color(seven_pct, seven_resets)
+  "#{limit_bar(five_pct, five_resets, '5h', five_hour_color(five_pct, five_resets), wide)}  #{limit_bar(seven_pct, seven_resets, '7d', seven_color, wide)}"
 end
 
 # Only the tail is read: the statusline re-runs often and transcripts grow large
@@ -194,30 +236,66 @@ def turn_usage(data)
   turn&.merge(tools: tools.size)
 end
 
-# ▲▼⚒ $  │  ctx — these share tokens, so they're built together
+# [▲▼⚒ ▣ctx, $cost] — these share tokens, so they're built together
 # ▲ blue = turn's first send hit a warm cache, red = cold (paid full price to re-send)
-def usage_str(data, warm)
-  cw = data['context_window'] || {}
-  cu = cw['current_usage'] || {}
+# Slot width = degraded size / count, so every zone edge lands on a slot edge:
+# Sonnet 10 x 40k, Opus 12 x 50k.
+RED_SLOTS = 2 # extra slots past degraded, same width
+def ctx_slot_count(model_name)
+  case model_name.to_s.downcase
+  when /opus/i   then 12
+  when /sonnet/i then 10
+  else 5
+  end
+end
 
-  tool_in    = dig_i(cu, 'cache_creation_input_tokens')
+# Every slot has the color of its band (the zone at the slot's start): solid
+# when ctx has reached it, hollow when it is still ahead. Solid slots turn red
+# when the cache has expired.
+def ctx_slots(ctx, model_name, expired)
+  count = ctx_slot_count(model_name)
+  width = model_zones(model_name)[2].to_f / count
+  count += RED_SLOTS # the red zone starts at degraded, so it needs slots of its own
+  lit   = [(ctx / width).floor, count].min
+  (1..count).map do |k|
+    band = MODEL_COLORS[model_level(((k - 1) * width).to_i, model_name)]
+    k <= lit ? paint(expired ? RED : band, '▰') : paint(band, '▱')
+  end.join
+end
+
+SHOW_TURN = true
+
+def usage_str(data, warm, expired = false, wide = false)
+  cw = data['context_window'] || {}
+
   turn_in    = dig_i(cw, 'total_input_tokens')
   turn_out   = dig_i(cw, 'total_output_tokens')
-  if (turn = turn_usage(data))
-    tool_in, down, warm, tools = turn[:up], turn[:down], turn[:warm], turn[:tools]
-  else
-    down, tools = turn_out, 0
-  end
   ctx_max    = dig_i(cw, 'context_window_size')
   cost       = dig_f(data, 'cost', 'total_cost_usd')
   model_name = data.dig('model', 'display_name')
 
   ctx = turn_in + turn_out
 
-  ctx_str  = paint(ctx_color(ctx, model_name, ctx_max), "ctx #{FMT[ctx]}")
-  up_str   = paint(warm.nil? ? '' : warm ? BLUE : RED, "▲#{FMT[tool_in]}")
-  down_str = paint(PURPLE, "▼#{FMT[down]}")
-  "#{up_str}  #{down_str}  ⚒#{tools} | $#{format('%.2f', cost)}  │  #{ctx_str}"
+  # Per-turn ▲▼⚒ took a while to tune: DO NOT DELETE. Set SHOW_TURN to false to
+  # hide it (it also skips reading the transcript).
+  turn_str = ''
+  if SHOW_TURN
+    cu      = cw['current_usage'] || {}
+    tool_in = dig_i(cu, 'cache_creation_input_tokens')
+    if (turn = turn_usage(data))
+      tool_in, down, warm, tools = turn[:up], turn[:down], turn[:warm], turn[:tools]
+    else
+      down, tools = turn_out, 0
+    end
+    up_str   = paint(warm.nil? ? '' : warm ? BLUE : RED, "▲#{FMT_TOKENS[tool_in]}")
+    down_str = paint(PURPLE, "▼#{FMT_TOKENS[down]}")
+    turn_str = "#{up_str} #{down_str} ⚒#{tools}  "
+  end
+
+  ctx_col  = expired ? RED : ctx_color(ctx, model_name, ctx_max)
+  ctx_str  = '▣' + (wide ? " #{ctx_slots(ctx, model_name, expired)}" : '') + paint(ctx_col, FMT_CTX[ctx])
+  # ▲▼⚒ sit just left of the cost
+  [ctx_str, "#{turn_str}#{format('$%.2f', cost)}"]
 end
 
 # [warm, expires_at]; nil when there is no cache
@@ -233,23 +311,143 @@ def prompt_cache(data)
   [warm, expires_at]
 end
 
-def render(data)
-  warm, expires_at = prompt_cache(data)
+CYAN, BOLD_BLUE, TURQUOISE = "\e[36m", "\e[1;34m", "\e[38;5;80m"
 
-  line = usage_str(data, warm)
+EFFORT_ARROWS = { 'low' => '↓', 'medium' => '→', 'high' => '↑', 'xhigh' => '⇑', 'max' => '⇈' }.freeze
+EFFORT_COLORS = { 'high' => YELLOW, 'xhigh' => RED, 'max' => RED }.freeze
 
-  rate_str = rate_limit_str(data)
-  line += "  │  #{rate_str}" if rate_str
+# "Opus ⇑": model name without the version, then an arrow for effort
+# (colored when xhigh/max). Medium and models without effort get no arrow.
+def model_str(data)
+  name  = data.dig('model', 'display_name').to_s[/\A[A-Za-z]+/].to_s
+  level = data.dig('effort', 'level')
+  return name if level.nil? || level == 'medium'
+  "#{name} #{paint(EFFORT_COLORS.fetch(level, ''), EFFORT_ARROWS.fetch(level, level[0]))}"
+end
 
-  if expires_at
-    remaining = expires_at - Time.now.to_i
-    if remaining > 0
-      line += "  │  #{paint(BLUE, "⛃ #{FMT_CLOCK[expires_at, false]}")}"
-    else
-      line += "  │  #{paint(RED, '⛃ EXPIRED')}"
+# Same walk as the PS1 in dotfiles/bashrc.d/git-prompt.sh: find .git by walking
+# up, read HEAD directly (no fork). A .git file means a linked worktree.
+# => [root_dir, branch, linked_worktree?] or nil outside git
+def git_head(start)
+  dir = start.to_s
+  until dir.empty? || dir == '/'
+    git = File.join(dir, '.git')
+    linked = File.file?(git)
+    if linked
+      gitdir = File.read(git)[/gitdir: (.+)/, 1]
+      head = File.join(File.expand_path(gitdir, dir), 'HEAD') if gitdir
+    elsif File.directory?(git)
+      head = File.join(git, 'HEAD')
     end
+    if head && File.file?(head)
+      ref = File.read(head)
+      return [dir, ref[%r{\Aref: refs/heads/(.+)}, 1]&.strip || '(detached)', linked]
+    end
+    dir = File.dirname(dir)
   end
-  line
+  nil
+end
+
+# One symbol, the first that applies, shown left of the repo name:
+#   ✖ detached HEAD (red)      ✚ any local change, staged or not (yellow)
+#   ⚑ stash (yellow)           ↑ unpushed commits, or no upstream (cyan)
+#   ↓ behind upstream (cyan)   ✔ in sync (green)
+# Ahead/behind are as of the last fetch: no network.
+def git_state(root)
+  out = IO.popen(['git', '-C', root, 'status', '--porcelain=v2', '--branch', '--show-stash', err: File::NULL], &:readlines)
+  return nil unless $?.success?
+
+  head     = out.find { |l| l.start_with?('# branch.head ') }.to_s.split.last
+  upstream = out.any? { |l| l.start_with?('# branch.upstream ') }
+  ahead, behind = out.find { |l| l.start_with?('# branch.ab ') }.to_s.scan(/\d+/).map(&:to_i)
+  stash    = out.find { |l| l.start_with?('# stash ') }.to_s.split.last.to_i
+  dirty    = out.any? { |l| !l.start_with?('#') }
+
+  if    head == '(detached)'                then paint(RED, '✖')
+  elsif dirty                               then paint(YELLOW, '✚')
+  elsif stash > 0                           then paint(YELLOW, '⚑')
+  elsif !upstream || ahead.to_i > 0         then paint(CYAN, '↑')
+  elsif behind.to_i > 0                     then paint(CYAN, '↓')
+  else paint(GREEN, '✔')
+  end
+end
+
+BRANCH_MAX = 24
+
+# "#22", linked to the PR (OSC 8) when the url is known
+def pr_str(data)
+  number = data.dig('pr', 'number')
+  return nil unless number
+  text = "##{number}"
+  url  = data.dig('pr', 'url')
+  url ? "\e]8;;#{url}\e\\#{text}\e]8;;\e\\" : text
+end
+
+# "repo branch #pr"; nil outside git. The branch is dropped on main and in a
+# linked worktree (the worktree folder already names it). State symbols come
+# first, the repo name is bold blue as in the PS1, the branch is cyan.
+#
+# wide: "✔ [branch] repo #pr", branch always shown (PS1 style).
+def git_str(data, wide = false)
+  dir = data.dig('workspace', 'current_dir') || data['cwd'] || Dir.pwd
+  root, branch, linked = git_head(dir)
+  return nil unless root
+  name = paint(BOLD_BLUE, File.basename(root))
+  text = branch.length > BRANCH_MAX ? "#{branch[0, BRANCH_MAX - 1]}…" : branch
+  if wide
+    parts = [git_state(root), "[#{paint(TURQUOISE, text)}]", name]
+  else
+    parts = [git_state(root), name]
+    parts << paint(TURQUOISE, text) unless linked || %w[main master].include?(branch)
+  end
+  parts << pr_str(data)
+  parts.compact.join(' ')
+end
+
+# Claude Code sets COLUMNS for us; notifications share the right edge, so keep a margin
+RIGHT_MARGIN = 5
+ANSI = /\e\[[0-9;]*m|\e\]8;;[^\e]*\e\\/
+
+def visible_len(str)
+  str.gsub(ANSI, '').length
+end
+
+# left-aligned on the left, right on the right (2-space gap when COLUMNS is unknown or tight)
+def justify(left, right)
+  gap = ENV['COLUMNS'].to_i - RIGHT_MARGIN - visible_len(left) - visible_len(right)
+  "#{left}#{' ' * [gap, 2].max}#{right}"
+end
+
+def cache_expired?(expires_at)
+  expires_at && expires_at <= Time.now.to_i
+end
+
+# Sits right after ctx (▣ is the icon for both); red once the cache is gone
+def cache_str(expires_at)
+  return nil unless expires_at
+  clock = cache_expired?(expires_at) ? paint(RED, 'EXPIRED') : paint(GREEN, FMT_CLOCK[expires_at, false])
+  "⛁ #{clock}"
+end
+
+# => [left, right]
+# wide:      ✔ [branch] repo #pr  ▣ ▰▱▱▱▱ ctx ⛁ clock          $cost  ◷ 5h ▰▱▱▱▱  ◷ 7d ▰▱▱▱▱  ⬢ model
+# condensed: ✔ repo branch #pr  ▣ ctx ⛁ clock                   $cost  ◷ 5h ⣿⡏⠀⠀  ◷ 7d ⠇⠀⠀⠀  ⬢ model
+def layout(data, wide)
+  warm, expires_at = prompt_cache(data)
+  usage, cost = usage_str(data, warm, cache_expired?(expires_at), wide)
+  ctx_clock = "#{usage} #{cache_str(expires_at)}".rstrip
+  model     = "⬢ #{model_str(data)}"
+  rates     = rate_limit_str(data, wide)
+
+  [[git_str(data, wide), ctx_clock].compact.join('  '), [cost, rates, model].compact.join('  ')]
+end
+
+# Wide when it fits COLUMNS, else condensed
+def render(data)
+  left, right = layout(data, true)
+  fits = visible_len(left) + 2 + visible_len(right) <= ENV['COLUMNS'].to_i - RIGHT_MARGIN
+  left, right = layout(data, false) unless fits
+  justify(left, right)
 end
 
 if __FILE__ == $0
