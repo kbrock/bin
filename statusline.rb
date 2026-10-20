@@ -2,24 +2,67 @@
 require 'json'
 require 'date'
 
-# Statusline — where's my cost/context going, and do I need to adjust?
+# Bar charts available (reference). Samples at ~60%.
 #
-#   ▲up ▼down    tokens for this whole turn: your prompt plus every tool
-#                round-trip (summed from the transcript). ▲ = new input
-#                (uncached + cache writes), ▼ = output. Falls back to the
-#                last API request when the transcript can't be read.
-#                ▲ blue/red = the turn's first send hit/missed the cache
-#                (tool round-trips are seconds apart, so they're always warm)
-#   ⚒count       tool calls this turn (0 when the transcript can't be read)
-#   $cost        session API cost (not real billing on subscription)
-#   ctx          context size; none/blue/yellow/red = model-degradation risk,
-#                bold red = 85% of context window (compaction imminent)
-#   5h/7d        subscription rate-limit usage; label IS the reset countdown.
-#                Either hitting 100% collapses this to "API <clock>" — you're
-#                on pay-as-you-go until then (7d wins if both are maxed)
-#                7d pace: 10% per weekday half-day (10am-3pm, 3pm-8pm) so far;
-#                purple = ahead of pace, green = 2+ half-days behind (use more)
-#   ⛃time       prompt-cache expiry; blue=still warm, red=expired (next send misses)
+# Binary: every cell is full or empty.
+#   circles       ●●●○○      big circles   ⬤⬤⬤◯◯      pills         ▮▮▮▯▯
+#   parallelogram ▰▰▰▱▱      squares       ■■■□□      rects         ◼◼◼▭▭
+#   arrows        ►►►▷▷      bars          ≡≡≡−−      shades        ▓▓▓░░
+#   solid+shade   ███░░      braille       ⣿⣿⣿⣀⣀      low line      ███▁▁
+#   emoji (2 wide, fixed color)  ⬛⬛⬛⬜⬜  ⚫⚫⚫⚪⚪
+#
+# Graded: one cell can be partly full, so N cells give more than N steps.
+#   eighth blocks ███▍ (▏▎▍▌▋▊▉█, 8 steps/cell)    braille dots (8 per cell, 4 tall)
+#   partial glyph ⬤⬤⬤◔○  ■■■◱□                     levels ▃▅▆█▇ (a sparkline, not a fill)
+#
+# Background track: fill in the foreground color over a gray background
+# (\e[48;5;238m) so the empty part shows where 100% ends. Works with any glyph,
+# best with eighth blocks and braille.
+#
+# Seen in the wild: solid colored fill, dithered dark track, percent in the
+# fill's color; green, then yellow, then red as it fills.
+
+# Statusline — where am I, what is this costing, and when does the cache go cold?
+#
+# One line: a left group and a right group, the right one pushed to the edge
+# using COLUMNS (minus RIGHT_MARGIN, which keeps clear of notifications).
+# Wide layout when it fits; otherwise narrow (no context bar, limits as %,
+# branch hidden on main/master and in worktrees).
+#
+#   ✔ [main] repo #22   one state symbol, [branch], repo (bold blue), PR number
+#                       (links to the PR). Branch is turquoise. The symbol is the
+#                       first that applies: ✖ red detached, ✚ yellow local changes,
+#                       ⚑ yellow stash, ↑ cyan unpushed or no upstream, ↓ cyan
+#                       behind, ✔ green in sync (ahead/behind as of the last fetch).
+#   ▣ ▰▰▱▱ 120.0k      context size. Green/blue/yellow/red = model-degradation
+#                       zones (model_zones); bold red = 85% of the context window;
+#                       red when the cache has expired. The bar (wide) is scaled to
+#                       the model's degraded size: Sonnet 10 slots of 40k, Opus 12
+#                       of 50k, plus RED_SLOTS past degraded. Each slot has its band's
+#                       color: solid once reached, hollow while ahead. The size takes
+#                       the color of the highest band reached.
+#   ⛁ 10:06pm          prompt-cache expiry: green = warm, red EXPIRED (next send
+#                       misses). Absent when Claude Code reports no expiry.
+#   ▲up ▼down ⚒count   tokens for this whole turn: your prompt plus every tool
+#                       round-trip (summed from the transcript). ▲ = new input
+#                       (uncached + cache writes), ▼ = output. Falls back to the
+#                       last API request when the transcript can't be read.
+#                       ▲ blue/red = the turn's first send hit/missed the cache
+#                       (tool round-trips are seconds apart, so they're always warm).
+#                       ⚒ = tool calls this turn. Off when SHOW_TURN is false.
+#   $cost               session API cost (not real billing on subscription)
+#   ◷ 3h ▰▰▱▱▱         5h and 7d subscription limits; the label IS the reset
+#                       countdown. Bar (wide) = 5 slots of 20%, or the % (narrow).
+#                       Color is pace: teal too low, green on pace, purple too
+#                       high, red at WALL (90%) or more.
+#                       5h pace is linear across the window (teal 10+ behind,
+#                       purple 10+ ahead). 7d pace is 10% per weekday half-day
+#                       (10am-3pm, 3pm-8pm) so far (teal 20+ behind, purple 10+
+#                       ahead). Either hitting 100% collapses both to
+#                       "API <clock>": you're on pay-as-you-go until then (7d
+#                       wins if both are maxed).
+#   ⬢ Opus ⇑           model name and effort: ↓ low, no arrow for medium,
+#                       ↑ yellow high, ⇑ red xhigh, ⇈ red max.
 
 def dig_i(h, *path)
   (h.dig(*path) || 0).to_i
