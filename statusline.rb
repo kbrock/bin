@@ -51,18 +51,34 @@ require 'date'
 #                       (tool round-trips are seconds apart, so they're always warm).
 #                       ⚒ = tool calls this turn. Off when SHOW_TURN is false.
 #   $cost               session API cost (not real billing on subscription)
-#   ◷ 3h ▰▰▱▱▱         5h and 7d subscription limits; the label IS the reset
+#   ◷ 3h ▰▱▱▱▱         5h and 7d subscription limits; the label IS the reset
 #                       countdown. Bar (wide) = 5 slots of 20%, or the % (narrow).
-#                       Color is pace: teal too low, green on pace, purple too
-#                       high, red at WALL (90%) or more.
-#                       5h pace is linear across the window (teal 10+ behind,
-#                       purple 10+ ahead). 7d pace is 10% per weekday half-day
-#                       (10am-3pm, 3pm-8pm) so far (teal 20+ behind, purple 10+
-#                       ahead). Either hitting 100% collapses both to
+#                       Used slots are solid: green, purple 10+ ahead of pace, red
+#                       at WALL (90%) or more. Behind pace, everything up to and
+#                       including the block you're in is bright green (used solid,
+#                       catch-up room hollow); the rest of the window is dim.
+#                       5h pace is linear across the window (1 slot per hour).
+#                       7d pace splits 100% over the half-days (10am-3pm, 3pm-8pm)
+#                       of the days in CLAUDE_PACE_DAYS (default mon-fri, 10% each)
+#                       reached so far.
+#                       Either hitting 100% collapses both to
 #                       "API <clock>": you're on pay-as-you-go until then (7d
 #                       wins if both are maxed).
+#   CLAUDE_PACE_DAYS    days the 7d pace counts: "mon-fri" (default), "sat,sun",
+#                       "all". Ranges and commas mix ("mon-wed,fri").
+#   Glyphs              STATUSLINE_GLYPH picks one pair for every bar (context and
+#                       limits): parallelogram (default), braille, circles,
+#                       squares, pills, shades.
 #   ⬢ Opus ⇑           model name and effort: ↓ low, no arrow for medium,
 #                       ↑ yellow high, ⇑ red xhigh, ⇈ red max.
+
+# One glyph pair for every bar (context and limits): [filled, hollow].
+# STATUSLINE_GLYPH picks the set; see the samples at the top.
+GLYPHS = {
+  'parallelogram' => %w[▰ ▱], 'circles' => %w[● ○], 'squares' => %w[■ □],
+  'pills' => %w[▮ ▯], 'braille' => %w[⣿ ⣀], 'shades' => %w[▓ ░]
+}.freeze
+FILL, HOLLOW = GLYPHS.fetch(ENV['STATUSLINE_GLYPH'].to_s, GLYPHS['parallelogram'])
 
 def dig_i(h, *path)
   (h.dig(*path) || 0).to_i
@@ -166,65 +182,88 @@ end
 HALF_DAY_STARTS = [10, 15].freeze
 HALF_DAY_SECS   = 5 * 3_600
 
-# 7d pace: 10% per weekday half-day reached so far this window (10 per week).
-# The half-day the window started in counts whole. Nights/weekends add nothing.
+DAY_NAMES = %w[sun mon tue wed thu fri sat].freeze
+
+# Days this account is used, as wday numbers. CLAUDE_PACE_DAYS="mon-fri" (work,
+# the default), "sat,sun" (personal) or "all" (every day); ranges and commas mix.
+def pace_days
+  spec = (ENV['CLAUDE_PACE_DAYS'] || 'mon-fri').downcase
+  return (0..6).to_a if spec == 'all'
+  spec.split(',').flat_map do |part|
+    from, to = part.split('-').map { |d| DAY_NAMES.index(d[0, 3]) }
+    next [from] unless to
+    from <= to ? (from..to).to_a : (from..6).to_a + (0..to).to_a
+  end.compact.uniq
+end
+
+# 7d pace: the week's 100% split evenly over the half-days of pace_days; each
+# one reached so far this window counts (10% each for mon-fri). The half-day the
+# window started in counts whole. Other days add nothing.
 def seven_day_allowance(resets_at)
   return 100 unless resets_at
+  days = pace_days
+  return 100 if days.empty?
   now   = Time.now
   start = Time.at(resets_at - 7 * 86_400)
   halves = (start.to_date..now.to_date).sum do |d|
-    next 0 if d.saturday? || d.sunday?
+    next 0 unless days.include?(d.wday)
     HALF_DAY_STARTS.count do |h|
       slot = Time.local(d.year, d.month, d.day, h)
       slot + HALF_DAY_SECS > start && slot <= now
     end
   end
-  [halves * 10, 100].min
+  [halves * 100.0 / (days.size * HALF_DAY_STARTS.size), 100].min
 end
 
 WALL = 90 # % used where a limit turns red regardless of pace
 
-TEAL = "\e[38;5;37m"
+BRIGHT_GREEN = "\e[1;92m"
+DIM_GREEN    = "\e[38;5;65m"
 
-# teal = too low (idle capacity), green = on pace, purple = too high, red = near the wall.
-# behind/ahead are how many points off pace counts as too low/too high.
-def pace_color(pct, pace, behind, ahead)
+# green = on pace or behind, purple = too high, red = near the wall.
+# pace is where you should be, in % (nil: unknown).
+def pace_color(pct, pace)
   return RED if pct >= WALL
-  pct < pace - behind ? TEAL : pct > pace + ahead ? PURPLE : GREEN
-end
-
-# pace is the weekday half-day allowance (see seven_day_allowance)
-def seven_day_color(pct, resets_at)
-  return GREEN unless resets_at
-  pace_color(pct, seven_day_allowance(resets_at), 20, 10)
+  pace && pct > pace + 10 ? PURPLE : GREEN
 end
 
 # pace is linear: the share of the window already elapsed
-def five_hour_color(pct, resets_at)
-  return GREEN unless resets_at
-  elapsed = (1 - (resets_at - Time.now.to_i) / 18_000.0).clamp(0, 1) * 100
-  pace_color(pct, elapsed, 10, 10)
+def five_hour_pace(resets_at)
+  return nil unless resets_at
+  (1 - (resets_at - Time.now.to_i) / 18_000.0).clamp(0, 1) * 100
 end
 
-def slots_bar(filled, total = 5)
-  '▰' * filled + '▱' * (total - filled)
+# pace is the allowance for the days this account works (see seven_day_allowance)
+def seven_day_pace(resets_at)
+  resets_at && seven_day_allowance(resets_at)
 end
 
-# 5 slots, 20% each; any use shows at least one, full only at 100%
-def limit_slots(pct)
+# 5 slots, 20% each; any use shows at least one, full only at 100%.
+# Behind pace, the window up to and including the block you're in is bright:
+# the used slots (solid) and the catch-up room (hollow). The rest is dim.
+def limit_slots(pct, pace, color)
   filled = (pct / 20.0).round
   filled = [filled, 1].max if pct > 0
   filled = [filled, 4].min if pct < 100
-  slots_bar([filled, 5].min)
+  filled = [filled, 5].min
+  due    = pace ? [(pace / 20.0).ceil, 5].min : 0
+  behind = color == GREEN && due > filled
+  (0...5).map do |k|
+    if    k < filled then paint(behind ? BRIGHT_GREEN : color, FILL)
+    elsif k < due    then paint(BRIGHT_GREEN, HOLLOW)
+    else                  paint(DIM_GREEN, HOLLOW)
+    end
+  end.join
 end
 
 # time left, then % used as a bar (wide) or a number (narrow), in the pace color
-def limit_bar(pct, resets, fallback, color, wide)
+def limit_bar(pct, resets, fallback, pace, wide)
+  color = pace_color(pct, pace)
   label = FMT_LEFT[resets]
   label = fallback if label.empty?
   # narrow: the % is right-aligned in 3 so "3h  5%" and "3d 42%" use one space for 2 digits
   return "◷ #{label} #{paint(color, format('%3s', "#{pct.round}%"))}" unless wide
-  "◷ #{label.ljust(3)} #{paint(color, limit_slots(pct))}"
+  "◷ #{label.ljust(3)} #{limit_slots(pct, pace, color)}"
 end
 
 def rate_limit_str(data, wide = false)
@@ -241,8 +280,7 @@ def rate_limit_str(data, wide = false)
     return paint(RED, "API #{clock}")
   end
 
-  seven_color = seven_day_color(seven_pct, seven_resets)
-  "#{limit_bar(five_pct, five_resets, '5h', five_hour_color(five_pct, five_resets), wide)}  #{limit_bar(seven_pct, seven_resets, '7d', seven_color, wide)}"
+  "#{limit_bar(five_pct, five_resets, '5h', five_hour_pace(five_resets), wide)}  #{limit_bar(seven_pct, seven_resets, '7d', seven_day_pace(seven_resets), wide)}"
 end
 
 # Only the tail is read: the statusline re-runs often and transcripts grow large
@@ -302,7 +340,7 @@ def ctx_slots(ctx, model_name)
   lit   = [(ctx / width).floor, count].min
   (1..count).map do |k|
     band = MODEL_COLORS[model_level(((k - 1) * width).to_i, model_name)]
-    k <= lit ? paint(band, '▰') : paint(band, '▱')
+    k <= lit ? paint(band, FILL) : paint(band, HOLLOW)
   end.join
 end
 
