@@ -553,6 +553,9 @@ def render(data)
 end
 
 if __FILE__ == $0
-  data = JSON.parse($stdin.read) rescue {}
+  input = $stdin.read
+  # dev only: STATUSLINE_DUMP=/path/file.json saves what Claude Code sends (owner-readable)
+  File.write(ENV['STATUSLINE_DUMP'], input, perm: 0o600) if ENV['STATUSLINE_DUMP']
+  data = JSON.parse(input) rescue {}
   puts render(data)
 end
