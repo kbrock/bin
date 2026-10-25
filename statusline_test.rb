@@ -662,4 +662,78 @@ class StatuslineTest < Minitest::Test
       assert_in_delta 50, session.five_expected, 0.01
     end
   end
+
+  # --- ClaudeSession turn: from the transcript when readable, else the last request ---
+  def turn_session(*requests, cache: nil)
+    file = Tempfile.new(['transcript', '.jsonl'])
+    file.puts({ 'type' => 'user', 'promptId' => 'p1' }.to_json)
+    requests.each_with_index do |(usage, tool), i|
+      content = tool ? [{ 'type' => 'tool_use', 'id' => "tool#{i}" }] : []
+      file.puts({ 'type' => 'assistant', 'promptId' => 'p1',
+                  'message' => { 'id' => "m#{i}", 'usage' => usage, 'content' => content } }.to_json)
+    end
+    file.flush
+    @transcripts = (@transcripts || []) << file # keep it alive for the test
+    data = { 'transcript_path' => file.path, 'prompt_id' => 'p1',
+             'context_window' => { 'total_output_tokens' => 9, 'current_usage' => { 'cache_creation_input_tokens' => 7 } } }
+    data['prompt_cache'] = cache if cache
+    ClaudeSession.new(data)
+  end
+
+  def test_turn_sums_every_request_in_the_prompt
+    session = turn_session(
+      [{ 'input_tokens' => 5, 'cache_creation_input_tokens' => 100, 'cache_read_input_tokens' => 1000, 'output_tokens' => 50 }, true],
+      [{ 'input_tokens' => 3, 'cache_creation_input_tokens' => 0, 'cache_read_input_tokens' => 1100, 'output_tokens' => 20 }, false]
+    )
+    assert_equal 108, session.turn_up
+    assert_equal 70, session.turn_down
+    assert_equal 1, session.turn_tools
+  end
+
+  def test_turn_cache_tier_is_decided_by_the_first_send
+    hit  = turn_session([{ 'cache_creation_input_tokens' => 100, 'cache_read_input_tokens' => 1000 }, false])
+    miss = turn_session([{ 'cache_creation_input_tokens' => 4000, 'cache_read_input_tokens' => 0 }, false])
+    assert_equal :cache_hit, hit.turn_cache_tier
+    assert_equal :cache_miss, miss.turn_cache_tier
+  end
+
+  def test_turn_falls_back_to_the_last_request_without_a_transcript
+    session = ClaudeSession.new('context_window' => { 'total_output_tokens' => 9, 'current_usage' => { 'cache_creation_input_tokens' => 7 } },
+                                'prompt_cache' => { 'warm' => false, 'expires_at' => 1 })
+    assert_equal 7, session.turn_up
+    assert_equal 9, session.turn_down
+    assert_equal 0, session.turn_tools
+    assert_equal :cache_miss, session.turn_cache_tier
+  end
+
+  def test_turn_cache_tier_nil_when_nothing_is_known
+    assert_nil ClaudeSession.new({}).turn_cache_tier
+  end
+
+  # --- ClaudeSession limit tiers: :wall at 90%, else by points past the pace ---
+  # five_tier for `pct` used when `expected_pct` of the 5h window has elapsed.
+  # The pace is computed lazily, so the tier is read while the clock is pinned.
+  def five_tier_at(pct, expected_pct)
+    on_pace_monday do |now|
+      resets = now + ((100 - expected_pct) / 100.0 * 18_000).round
+      ClaudeSession.new('rate_limits' => { 'five_hour' => { 'used_percentage' => pct, 'resets_at' => resets } }).five_tier
+    end
+  end
+
+  def test_five_tier_behind_on_pace_and_ahead
+    assert_equal :behind, five_tier_at(20, 40)
+    assert_equal :on_pace, five_tier_at(40, 40)
+    assert_equal :on_pace, five_tier_at(49, 40)
+    assert_equal :ahead, five_tier_at(51, 40)
+  end
+
+  def test_five_tier_wall_wins_over_pace
+    assert_equal :wall, five_tier_at(90, 95)
+    assert_equal :wall, five_tier_at(95, 40)
+    assert_equal :ahead, five_tier_at(89, 40)
+  end
+
+  def test_limit_tier_without_a_pace_is_on_pace
+    assert_equal :on_pace, ClaudeSession.new('rate_limits' => { 'five_hour' => { 'used_percentage' => 50 } }).five_tier
+  end
 end

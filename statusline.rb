@@ -54,7 +54,7 @@ require 'date'
 #   ◷ 3h ▰▱▱▱▱         5h and 7d subscription limits; the label IS the reset
 #                       countdown. Bar (wide) = 5 slots of 20%, or the % (narrow).
 #                       Used slots are solid: green, purple 10+ ahead of pace, red
-#                       at WALL (90%) or more. Behind pace, everything up to and
+#                       at LIMIT_WALL (90%) or more. Behind pace, everything up to and
 #                       including the block you're in is bright green (used solid,
 #                       catch-up room hollow); the rest of the window is dim.
 #                       5h pace is linear across the window (1 slot per hour).
@@ -145,7 +145,9 @@ MODEL_COLORS = [GREEN, BLUE, YELLOW, RED].freeze
 
 # Tier name to color. The session names what a value means; this decides how it looks.
 THEME = {
-  good: GREEN, multi_hop: BLUE, degraded: YELLOW, fried: RED, compact: BOLD_RED
+  good: GREEN, multi_hop: BLUE, degraded: YELLOW, fried: RED, compact: BOLD_RED,
+  cache_hit: BLUE, cache_miss: RED,
+  behind: GREEN, on_pace: GREEN, ahead: PURPLE, wall: RED
 }.freeze
 
 CTX_TIER_NAMES = %i[good multi_hop degraded fried].freeze
@@ -220,17 +222,13 @@ def seven_day_allowance(resets_at)
   [halves * 100.0 / (days.size * HALF_DAY_STARTS.size), 100].min
 end
 
-WALL = 90 # % used where a limit turns red regardless of pace
+# Limit tiers. :wall comes from the % used; the others from how far past the
+# pace you are, in points (negative = behind). Lower bounds, see calc_tier.
+LIMIT_WALL = { 90 => :wall }.freeze
+LIMIT_PACE = { -Float::INFINITY => :behind, 0 => :on_pace, 10 => :ahead }.freeze
 
 BRIGHT_GREEN = "\e[1;92m"
 DIM_GREEN    = "\e[38;5;65m"
-
-# green = on pace or behind, purple = too high, red = near the wall.
-# pace is where you should be, in % (nil: unknown).
-def pace_color(pct, pace)
-  return RED if pct >= WALL
-  pace && pct > pace + 10 ? PURPLE : GREEN
-end
 
 # pace is linear: the share of the window already elapsed
 def five_hour_pace(resets_at)
@@ -262,8 +260,8 @@ def limit_slots(pct, pace, color)
 end
 
 # time left, then % used as a bar (wide) or a number (narrow), in the pace color
-def limit_bar(pct, resets, fallback, pace, wide)
-  color = pace_color(pct, pace)
+def limit_bar(pct, resets, fallback, pace, tier, wide)
+  color = THEME[tier]
   label = FMT_LEFT[resets]
   label = fallback if label.empty?
   # narrow: the % is right-aligned in 3 so "3h  5%" and "3d 42%" use one space for 2 digits
@@ -283,7 +281,7 @@ def rate_limit_str(session, wide = false)
     return paint(RED, "API #{clock}")
   end
 
-  "#{limit_bar(session.five_pct, session.five_resets, '5h', session.five_expected, wide)}  #{limit_bar(session.seven_pct, session.seven_resets, '7d', session.seven_expected, wide)}"
+  "#{limit_bar(session.five_pct, session.five_resets, '5h', session.five_expected, session.five_tier, wide)}  #{limit_bar(session.seven_pct, session.seven_resets, '7d', session.seven_expected, session.seven_tier, wide)}"
 end
 
 # Only the tail is read: the statusline re-runs often and transcripts grow large
@@ -364,14 +362,9 @@ end
 # hide it (it also skips reading the transcript).
 def turn_str(session)
   return nil unless SHOW_TURN
-  if (turn = session.turn)
-    up, down, warm, tools = turn[:up], turn[:down], turn[:warm], turn[:tools]
-  else
-    up, down, warm, tools = session.cache_created, session.output_tokens, session.cache_warm, 0
-  end
-  up_str   = paint(warm.nil? ? '' : warm ? BLUE : RED, "▲#{FMT_TOKENS[up]}")
-  down_str = paint(PURPLE, "▼#{FMT_TOKENS[down]}")
-  "#{up_str} #{down_str} ⚒#{tools}"
+  up_str   = paint(THEME[session.turn_cache_tier], "▲#{FMT_TOKENS[session.turn_up]}")
+  down_str = paint(PURPLE, "▼#{FMT_TOKENS[session.turn_down]}")
+  "#{up_str} #{down_str} ⚒#{session.turn_tools}"
 end
 
 def cost_str(session)
@@ -588,6 +581,15 @@ class ClaudeSession
     @five_expected ||= five_hour_pace(five_resets)
   end
 
+  # :wall, :ahead, :on_pace or :behind; no pace known counts as :on_pace
+  def five_tier
+    limit_tier(five_pct, five_expected)
+  end
+
+  def seven_tier
+    limit_tier(seven_pct, seven_expected)
+  end
+
   def seven_expected
     @seven_expected ||= seven_day_pace(seven_resets)
   end
@@ -622,6 +624,26 @@ class ClaudeSession
     defined?(@turn) ? @turn : (@turn = turn_usage(@data))
   end
 
+  # Tokens sent, tokens received and tool calls for this turn. From the
+  # transcript when it can be read, else from the last request.
+  def turn_up
+    turn ? turn[:up] : cache_created
+  end
+
+  def turn_down
+    turn ? turn[:down] : output_tokens
+  end
+
+  def turn_tools
+    turn ? turn[:tools] : 0
+  end
+
+  # Did the turn's first send find the cache? :cache_hit, :cache_miss, nil if unknown
+  def turn_cache_tier
+    warm = turn ? turn[:warm] : cache_warm
+    warm.nil? ? nil : (warm ? :cache_hit : :cache_miss)
+  end
+
   # nil outside git; these read .git/HEAD
   def git_root
     repo&.at(0)
@@ -640,6 +662,10 @@ class ClaudeSession
   end
 
   private
+
+  def limit_tier(pct, expected)
+    calc_tier(pct, LIMIT_WALL) || (expected ? calc_tier(pct - expected, LIMIT_PACE) : :on_pace)
+  end
 
   def cache
     @cache ||= prompt_cache(@data)
