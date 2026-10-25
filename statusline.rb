@@ -496,53 +496,148 @@ class ClaudeSession
     @data = data
   end
 
-  def ctx          = @ctx ||= dig_i(context_window, 'total_input_tokens') + dig_i(context_window, 'total_output_tokens')
-  def output_tokens  = @output_tokens ||= dig_i(context_window, 'total_output_tokens')
-  def cache_created  = @cache_created ||= dig_i(context_window, 'current_usage', 'cache_creation_input_tokens')
+  def ctx
+    @ctx ||= dig_i(context_window, 'total_input_tokens') + dig_i(context_window, 'total_output_tokens')
+  end
+
+  def output_tokens
+    @output_tokens ||= dig_i(context_window, 'total_output_tokens')
+  end
+
+  def cache_created
+    @cache_created ||= dig_i(context_window, 'current_usage', 'cache_creation_input_tokens')
+  end
   # Reasoning-quality zones for this model; level 0-3 for the current ctx; and
   # whether ctx is near the physical window limit
-  def ctx_zones       = @ctx_zones ||= model_zones(model_name)
-  def ctx_level      = model_level(ctx, model_name)
-  def ctx_alert?     = physical_alert?(ctx, window_size)
-  def window_size  = @window_size ||= dig_i(context_window, 'context_window_size')
-  def cost         = @cost ||= dig_f(@data, 'cost', 'total_cost_usd')
-  def model_name   = @model_name ||= @data.dig('model', 'display_name')
-  def effort       = @effort ||= @data.dig('effort', 'level')
-  def cwd          = @cwd ||= @data.dig('workspace', 'current_dir') || @data['cwd'] || Dir.pwd
+  def ctx_zones
+    @ctx_zones ||= model_zones(model_name)
+  end
+
+  def ctx_level
+    model_level(ctx, model_name)
+  end
+
+  def ctx_alert?
+    physical_alert?(ctx, window_size)
+  end
+
+  def window_size
+    @window_size ||= dig_i(context_window, 'context_window_size')
+  end
+
+  def cost
+    @cost ||= dig_f(@data, 'cost', 'total_cost_usd')
+  end
+
+  def model_name
+    @model_name ||= @data.dig('model', 'display_name')
+  end
+
+  def effort
+    @effort ||= @data.dig('effort', 'level')
+  end
+
+  def cwd
+    @cwd ||= @data.dig('workspace', 'current_dir') || @data['cwd'] || Dir.pwd
+  end
 
   # nil when there are no subscription limits (API key)
-  def limits?      = !@data['rate_limits'].nil?
-  def five_pct     = five_hour.first
-  def five_resets  = five_hour.last
-  def seven_pct    = seven_day.first
-  def seven_resets = seven_day.last
-  def five_expected  = @five_expected ||= five_hour_pace(five_resets)
-  def seven_expected = @seven_expected ||= seven_day_pace(seven_resets)
+  def limits?
+    !@data['rate_limits'].nil?
+  end
+
+  def five_pct
+    five_hour.first
+  end
+
+  def five_resets
+    five_hour.last
+  end
+
+  def seven_pct
+    seven_day.first
+  end
+
+  def seven_resets
+    seven_day.last
+  end
+
+  def five_expected
+    @five_expected ||= five_hour_pace(five_resets)
+  end
+
+  def seven_expected
+    @seven_expected ||= seven_day_pace(seven_resets)
+  end
 
   # nil when Claude Code reports no cache expiry
-  def cache_warm         = cache&.first
-  def cache_expires_at   = cache&.last
-  def cache_expired?     = !!cache_expires_at && cache_expires_at <= Time.now.to_i
-  def cache_seconds_left = cache_expires_at && cache_expires_at - Time.now.to_i
-  def pr_number    = @data.dig('pr', 'number')
-  def pr_url       = @data.dig('pr', 'url')
+  def cache_warm
+    cache&.first
+  end
+
+  def cache_expires_at
+    cache&.last
+  end
+
+  def cache_expired?
+    !!cache_expires_at && cache_expires_at <= Time.now.to_i
+  end
+
+  def cache_seconds_left
+    cache_expires_at && cache_expires_at - Time.now.to_i
+  end
+
+  def pr_number
+    @data.dig('pr', 'number')
+  end
+
+  def pr_url
+    @data.dig('pr', 'url')
+  end
 
   # {up:, down:, warm:, tools:} or nil; reads the transcript
-  def turn         = defined?(@turn) ? @turn : (@turn = turn_usage(@data))
+  def turn
+    defined?(@turn) ? @turn : (@turn = turn_usage(@data))
+  end
 
   # nil outside git; these read .git/HEAD
-  def git_root     = repo&.at(0)
-  def git_branch   = repo&.at(1)
-  def git_linked?  = repo&.at(2)
-  def git_state    = @git_state ||= git_status(git_root) # forks `git status`
+  def git_root
+    repo&.at(0)
+  end
+
+  def git_branch
+    repo&.at(1)
+  end
+
+  def git_linked?
+    repo&.at(2)
+  end
+
+  def git_state
+    @git_state ||= git_status(git_root) # forks `git status`
+  end
 
   private
 
-  def cache          = @cache ||= prompt_cache(@data)
-  def repo           = defined?(@repo) ? @repo : (@repo = git_head(cwd))
-  def context_window = @context_window ||= @data['context_window'] || {}
-  def five_hour      = @five_hour ||= limit_window(@data, 'five_hour')
-  def seven_day      = @seven_day ||= limit_window(@data, 'seven_day')
+  def cache
+    @cache ||= prompt_cache(@data)
+  end
+
+  def repo
+    defined?(@repo) ? @repo : (@repo = git_head(cwd))
+  end
+
+  def context_window
+    @context_window ||= @data['context_window'] || {}
+  end
+
+  def five_hour
+    @five_hour ||= limit_window(@data, 'five_hour')
+  end
+
+  def seven_day
+    @seven_day ||= limit_window(@data, 'seven_day')
+  end
 end
 
 # Claude Code sets COLUMNS for us; notifications share the right edge, so keep a margin
