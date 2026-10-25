@@ -167,9 +167,9 @@ def physical_alert?(ctx, window_size)
   (ctx.to_f / window_size) >= 0.85
 end
 
-def ctx_color(ctx, model_name, window_size)
-  return BOLD_RED if physical_alert?(ctx, window_size)
-  MODEL_COLORS[model_level(ctx, model_name)]
+def ctx_color(session)
+  return BOLD_RED if session.ctx_alert?
+  MODEL_COLORS[session.ctx_level]
 end
 
 # [used %, resets_at]; a window with no activity yet (5h first thing in the morning) is 0%
@@ -266,21 +266,19 @@ def limit_bar(pct, resets, fallback, pace, wide)
   "◷ #{label.ljust(3)} #{limit_slots(pct, pace, color)}"
 end
 
-def rate_limit_str(data, wide = false)
-  return nil unless data['rate_limits'] # no subscription limits (API key)
-  five_pct,  five_resets  = limit_window(data, 'five_hour')
-  seven_pct, seven_resets = limit_window(data, 'seven_day')
+def rate_limit_str(session, wide = false)
+  return nil unless session.limits? # no subscription limits (API key)
 
-  if five_pct >= 100 || seven_pct >= 100
+  if session.five_pct >= 100 || session.seven_pct >= 100
     # Subscription usage is blocked — you're on API billing (Usage Credits,
     # if enabled) until this clears. 7d always wins here: even if 5h resets
     # in the meantime, you're still gated by 7d, so that's the only reset
     # worth knowing about. Percentage is dropped — it's just 100%, not info.
-    clock = seven_pct >= 100 ? FMT_CLOCK[seven_resets, true] : FMT_CLOCK[five_resets, false]
+    clock = session.seven_pct >= 100 ? FMT_CLOCK[session.seven_resets, true] : FMT_CLOCK[session.five_resets, false]
     return paint(RED, "API #{clock}")
   end
 
-  "#{limit_bar(five_pct, five_resets, '5h', five_hour_pace(five_resets), wide)}  #{limit_bar(seven_pct, seven_resets, '7d', seven_day_pace(seven_resets), wide)}"
+  "#{limit_bar(session.five_pct, session.five_resets, '5h', session.five_expected, wide)}  #{limit_bar(session.seven_pct, session.seven_resets, '7d', session.seven_expected, wide)}"
 end
 
 # Only the tail is read: the statusline re-runs often and transcripts grow large
@@ -333,50 +331,41 @@ end
 
 # Every slot has the color of its band (the zone at the slot's start): solid
 # when ctx has reached it, hollow when it is still ahead.
-def ctx_slots(ctx, model_name)
-  count = ctx_slot_count(model_name)
-  width = model_zones(model_name)[2].to_f / count
+def ctx_slots(session)
+  count = ctx_slot_count(session.model_name)
+  width = session.ctx_zones[2].to_f / count
   count += RED_SLOTS # the red zone starts at degraded, so it needs slots of its own
-  lit   = [(ctx / width).floor, count].min
+  lit   = [(session.ctx / width).floor, count].min
   (1..count).map do |k|
-    band = MODEL_COLORS[model_level(((k - 1) * width).to_i, model_name)]
+    band = MODEL_COLORS[model_level(((k - 1) * width).to_i, session.model_name)]
     k <= lit ? paint(band, FILL) : paint(band, HOLLOW)
   end.join
 end
 
 SHOW_TURN = true
 
-def usage_str(data, warm, wide = false, size = true, extras = true)
-  cw = data['context_window'] || {}
-
-  turn_in    = dig_i(cw, 'total_input_tokens')
-  turn_out   = dig_i(cw, 'total_output_tokens')
-  ctx_max    = dig_i(cw, 'context_window_size')
-  cost       = dig_f(data, 'cost', 'total_cost_usd')
-  model_name = data.dig('model', 'display_name')
-
-  ctx = turn_in + turn_out
+def usage_str(session, wide = false, size = true, extras = true)
+  ctx, cost = session.ctx, session.cost
+  warm = session.cache_warm
 
   # Per-turn ▲▼⚒ took a while to tune: DO NOT DELETE. Set SHOW_TURN to false to
   # hide it (it also skips reading the transcript).
   turn_str = ''
   if SHOW_TURN && extras
-    cu      = cw['current_usage'] || {}
-    tool_in = dig_i(cu, 'cache_creation_input_tokens')
-    if (turn = turn_usage(data))
+    if (turn = session.turn)
       tool_in, down, warm, tools = turn[:up], turn[:down], turn[:warm], turn[:tools]
     else
-      down, tools = turn_out, 0
+      tool_in, down, tools = session.cache_created, session.output_tokens, 0
     end
     up_str   = paint(warm.nil? ? '' : warm ? BLUE : RED, "▲#{FMT_TOKENS[tool_in]}")
     down_str = paint(PURPLE, "▼#{FMT_TOKENS[down]}")
     turn_str = "#{up_str} #{down_str} ⚒#{tools}  "
   end
 
-  ctx_col  = ctx_color(ctx, model_name, ctx_max)
+  ctx_col  = ctx_color(session)
   # the ▣ takes the size's color (so the 85% alert shows without the number)
   ctx_str  = paint(ctx_col, '▣')
-  ctx_str += " #{ctx_slots(ctx, model_name)}" if wide
+  ctx_str += " #{ctx_slots(session)}" if wide
   ctx_str += paint(ctx_col, FMT_CTX[ctx]) if size
   # ▲▼⚒ sit just left of the cost
   [ctx_str, extras ? "#{turn_str}#{paint(MUTED, format('$%.2f', cost))}" : nil]
@@ -406,9 +395,9 @@ EFFORT_COLORS = { 'high' => YELLOW, 'xhigh' => RED, 'max' => RED }.freeze
 
 # "Opus ⇑": model name without the version, then an arrow for effort
 # (colored when xhigh/max). Medium and models without effort get no arrow.
-def model_str(data)
-  name  = paint(MUTED, data.dig('model', 'display_name').to_s[/\A[A-Za-z]+/].to_s)
-  level = data.dig('effort', 'level')
+def model_str(session)
+  name  = paint(MUTED, session.model_name.to_s[/\A[A-Za-z]+/].to_s)
+  level = session.effort
   return name if level.nil? || level == 'medium'
   "#{name} #{paint(EFFORT_COLORS.fetch(level, ''), EFFORT_ARROWS.fetch(level, level[0]))}"
 end
@@ -437,11 +426,10 @@ def git_head(start)
 end
 
 # One symbol, the first that applies, shown left of the repo name:
-#   ✖ detached HEAD (red)      ✚ any local change, staged or not (yellow)
-#   ⚑ stash (yellow)           ↑ unpushed commits, or no upstream (cyan)
-#   ↓ behind upstream (cyan)   ✔ in sync (green)
+# The first that applies: :detached, :dirty (any local change, staged or not),
+# :stash, :unpushed (or no upstream), :behind, :synced. nil if git fails.
 # Ahead/behind are as of the last fetch: no network.
-def git_state(root)
+def git_status(root)
   out = IO.popen(['git', '-C', root, 'status', '--porcelain=v2', '--branch', '--show-stash', err: File::NULL], &:readlines)
   return nil unless $?.success?
 
@@ -451,23 +439,29 @@ def git_state(root)
   stash    = out.find { |l| l.start_with?('# stash ') }.to_s.split.last.to_i
   dirty    = out.any? { |l| !l.start_with?('#') }
 
-  if    head == '(detached)'                then paint(RED, '✖')
-  elsif dirty                               then paint(YELLOW, '✚')
-  elsif stash > 0                           then paint(YELLOW, '⚑')
-  elsif !upstream || ahead.to_i > 0         then paint(CYAN, '↑')
-  elsif behind.to_i > 0                     then paint(CYAN, '↓')
-  else paint(GREEN, '✔')
+  if    head == '(detached)'        then :detached
+  elsif dirty                       then :dirty
+  elsif stash > 0                   then :stash
+  elsif !upstream || ahead.to_i > 0 then :unpushed
+  elsif behind.to_i > 0             then :behind
+  else :synced
   end
 end
+
+# One symbol, shown left of the repo name: [color, glyph]
+GIT_STATE_MARKS = {
+  detached: [RED, '✖'], dirty: [YELLOW, '✚'], stash: [YELLOW, '⚑'],
+  unpushed: [CYAN, '↑'], behind: [CYAN, '↓'], synced: [GREEN, '✔']
+}.freeze
 
 BRANCH_MAX = 24
 
 # "#22", linked to the PR (OSC 8) when the url is known
-def pr_str(data)
-  number = data.dig('pr', 'number')
+def pr_str(session)
+  number = session.pr_number
   return nil unless number
   text = "##{number}"
-  url  = data.dig('pr', 'url')
+  url  = session.pr_url
   url ? "\e]8;;#{url}\e\\#{text}\e]8;;\e\\" : text
 end
 
@@ -476,20 +470,79 @@ end
 # first, the repo name is bold blue as in the PS1, the branch is cyan.
 #
 # wide: "✔ [branch] repo #pr", branch always shown (PS1 style).
-def git_str(data, wide = false)
-  dir = data.dig('workspace', 'current_dir') || data['cwd'] || Dir.pwd
-  root, branch, linked = git_head(dir)
+def git_str(session, wide = false)
+  root, branch, linked = session.git_root, session.git_branch, session.git_linked?
   return nil unless root
+  mark = GIT_STATE_MARKS[session.git_state]
+  state = mark && paint(*mark)
   name = paint(BOLD_BLUE, File.basename(root))
   text = branch.length > BRANCH_MAX ? "#{branch[0, BRANCH_MAX - 1]}…" : branch
   if wide
-    parts = [git_state(root), "[#{paint(TURQUOISE, text)}]", name]
+    parts = [state, "[#{paint(TURQUOISE, text)}]", name]
   else
-    parts = [git_state(root), name]
+    parts = [state, name]
     parts << paint(TURQUOISE, text) unless linked || %w[main master].include?(branch)
   end
-  parts << pr_str(data)
+  parts << pr_str(session)
   parts.compact.join(' ')
+end
+
+# Everything a display needs, read from the JSON Claude Code sends. Every value is
+# a method, memoized, so what the line doesn't show is never computed: the
+# transcript is only read by #turn, `git status` only by #git_state.
+# Limits are percents (0-100), and so are the *_expected pace values.
+class ClaudeSession
+  def initialize(data)
+    @data = data
+  end
+
+  def ctx          = @ctx ||= dig_i(context_window, 'total_input_tokens') + dig_i(context_window, 'total_output_tokens')
+  def output_tokens  = @output_tokens ||= dig_i(context_window, 'total_output_tokens')
+  def cache_created  = @cache_created ||= dig_i(context_window, 'current_usage', 'cache_creation_input_tokens')
+  # Reasoning-quality zones for this model; level 0-3 for the current ctx; and
+  # whether ctx is near the physical window limit
+  def ctx_zones       = @ctx_zones ||= model_zones(model_name)
+  def ctx_level      = model_level(ctx, model_name)
+  def ctx_alert?     = physical_alert?(ctx, window_size)
+  def window_size  = @window_size ||= dig_i(context_window, 'context_window_size')
+  def cost         = @cost ||= dig_f(@data, 'cost', 'total_cost_usd')
+  def model_name   = @model_name ||= @data.dig('model', 'display_name')
+  def effort       = @effort ||= @data.dig('effort', 'level')
+  def cwd          = @cwd ||= @data.dig('workspace', 'current_dir') || @data['cwd'] || Dir.pwd
+
+  # nil when there are no subscription limits (API key)
+  def limits?      = !@data['rate_limits'].nil?
+  def five_pct     = five_hour.first
+  def five_resets  = five_hour.last
+  def seven_pct    = seven_day.first
+  def seven_resets = seven_day.last
+  def five_expected  = @five_expected ||= five_hour_pace(five_resets)
+  def seven_expected = @seven_expected ||= seven_day_pace(seven_resets)
+
+  # nil when Claude Code reports no cache expiry
+  def cache_warm         = cache&.first
+  def cache_expires_at   = cache&.last
+  def cache_expired?     = !!cache_expires_at && cache_expires_at <= Time.now.to_i
+  def cache_seconds_left = cache_expires_at && cache_expires_at - Time.now.to_i
+  def pr_number    = @data.dig('pr', 'number')
+  def pr_url       = @data.dig('pr', 'url')
+
+  # {up:, down:, warm:, tools:} or nil; reads the transcript
+  def turn         = defined?(@turn) ? @turn : (@turn = turn_usage(@data))
+
+  # nil outside git; these read .git/HEAD
+  def git_root     = repo&.at(0)
+  def git_branch   = repo&.at(1)
+  def git_linked?  = repo&.at(2)
+  def git_state    = @git_state ||= git_status(git_root) # forks `git status`
+
+  private
+
+  def cache          = @cache ||= prompt_cache(@data)
+  def repo           = defined?(@repo) ? @repo : (@repo = git_head(cwd))
+  def context_window = @context_window ||= @data['context_window'] || {}
+  def five_hour      = @five_hour ||= limit_window(@data, 'five_hour')
+  def seven_day      = @seven_day ||= limit_window(@data, 'seven_day')
 end
 
 # Claude Code sets COLUMNS for us; notifications share the right edge, so keep a margin
@@ -506,19 +559,16 @@ def justify(left, right)
   "#{left}#{' ' * [gap, 2].max}#{right}"
 end
 
-def cache_expired?(expires_at)
-  expires_at && expires_at <= Time.now.to_i
-end
-
 # Under this the clock turns turquoise: a nudge, not an alarm (the expiry keeps
 # getting pushed out, so yellow would fire too often)
 CACHE_LOW_SECS = 120
 
 # Sits right after ctx (▣ is the icon for both); red once the cache is gone
-def cache_str(expires_at)
+def cache_str(session)
+  expires_at = session.cache_expires_at
   return nil unless expires_at
-  clock = if cache_expired?(expires_at) then paint(RED, 'EXPIRED')
-          elsif expires_at - Time.now.to_i < CACHE_LOW_SECS then paint(TURQUOISE, FMT_CLOCK[expires_at, false])
+  clock = if session.cache_expired? then paint(RED, 'EXPIRED')
+          elsif session.cache_seconds_left < CACHE_LOW_SECS then paint(TURQUOISE, FMT_CLOCK[expires_at, false])
           else paint(GREEN, FMT_CLOCK[expires_at, false])
           end
   "⛁ #{clock}"
@@ -528,13 +578,13 @@ end
 # wide:      ✔ [branch] repo #pr  ▣ ▰▱▱▱▱ ctx ⛁ clock          $cost  ◷ 5h ▰▱▱▱▱  ◷ 7d ▰▱▱▱▱  ⬢ model
 # condensed: ✔ repo branch #pr  ▣ ctx ⛁ clock                   $cost  ◷ 5h ⣿⡏⠀⠀  ◷ 7d ⠇⠀⠀⠀  ⬢ model
 def layout(data, wide, size, extras)
-  warm, expires_at = prompt_cache(data)
-  usage, cost = usage_str(data, warm, wide, size, extras)
-  ctx_clock = "#{usage} #{cache_str(expires_at)}".rstrip
-  model     = "⬢ #{model_str(data)}"
-  rates     = rate_limit_str(data, wide)
+  session = ClaudeSession.new(data)
+  usage, cost = usage_str(session, wide, size, extras)
+  ctx_clock = "#{usage} #{cache_str(session)}".rstrip
+  model     = "⬢ #{model_str(session)}"
+  rates     = rate_limit_str(session, wide)
 
-  [[git_str(data, wide), ctx_clock].compact.join('  '), [[cost, rates].compact.join('  '), (model if extras)].compact.join('  ')]
+  [[git_str(session, wide), ctx_clock].compact.join('  '), [[cost, rates].compact.join('  '), (model if extras)].compact.join('  ')]
 end
 
 # Tried in order: [bars, ctx size, ▲▼⚒ $cost model]

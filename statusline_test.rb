@@ -94,20 +94,25 @@ class StatuslineTest < Minitest::Test
   end
 
   # --- ctx_color: physical overrides model, red never becomes bold on its own ---
+  def ctx_session(ctx, model, window)
+    ClaudeSession.new('context_window' => { 'total_input_tokens' => ctx, 'context_window_size' => window },
+                      'model' => { 'display_name' => model })
+  end
+
   def test_color_good_is_green
-    assert_equal GREEN, ctx_color(10_000, 'Claude Sonnet 5', 1_000_000)
+    assert_equal GREEN, ctx_color(ctx_session(10_000, 'Claude Sonnet 5', 1_000_000))
   end
 
   def test_color_model_fried_is_plain_red_not_bold
     # ctx=450k trips Sonnet's degraded threshold (400k), but window is huge so plenty of physical room
-    assert_equal RED, ctx_color(450_000, 'Claude Sonnet 5', 1_000_000)
+    assert_equal RED, ctx_color(ctx_session(450_000, 'Claude Sonnet 5', 1_000_000))
   end
 
   def test_color_physical_checkpoint_overrides_low_model_level
     # ctx=300k is under Opus's degraded (600k) and multi_hop (350k) thresholds -- model_level is only 1 (blue) --
     # but a small window (340k) puts ~88% used, so physical wins and forces bold red
     assert_equal 1, model_level(300_000, 'Claude Opus 5.5')
-    assert_equal BOLD_RED, ctx_color(300_000, 'Claude Opus 5.5', 340_000)
+    assert_equal BOLD_RED, ctx_color(ctx_session(300_000, 'Claude Opus 5.5', 340_000))
   end
 
   # --- FMT_LEFT: single unit, always rounded UP ---
@@ -159,12 +164,12 @@ class StatuslineTest < Minitest::Test
         'five_hour' => { 'used_percentage' => 42, 'resets_at' => now + 4 * 3_600 + 56 * 60 },
         'seven_day' => { 'used_percentage' => 5, 'resets_at' => now + 5 * 86_400 + 22 * 3_600 },
       } }
-      assert_equal '◷ 5h 42%  ◷ 6d  5%', plain(rate_limit_str(data))
+      assert_equal '◷ 5h 42%  ◷ 6d  5%', plain(rate_limit_str(ClaudeSession.new(data)))
     end
   end
 
   def test_rate_limit_nil_when_no_rate_limits_present
-    assert_nil rate_limit_str({})
+    assert_nil rate_limit_str(ClaudeSession.new({}))
   end
 
   # --- rate_limit_str: maxed collapses the whole field to "API <clock>" ---
@@ -173,7 +178,7 @@ class StatuslineTest < Minitest::Test
       'five_hour' => { 'used_percentage' => 100, 'resets_at' => Time.new(2026, 9, 24, 21, 50, 0).to_i },
       'seven_day' => { 'used_percentage' => 40, 'resets_at' => Time.now.to_i + 4 * 86_400 },
     } }
-    assert_equal "#{RED}API 09:50pm#{RESET}", rate_limit_str(data)
+    assert_equal "#{RED}API 09:50pm#{RESET}", rate_limit_str(ClaudeSession.new(data))
   end
 
   def test_rate_limit_seven_day_maxed_shows_full_date_even_if_today
@@ -181,7 +186,7 @@ class StatuslineTest < Minitest::Test
       'five_hour' => { 'used_percentage' => 30, 'resets_at' => Time.now.to_i + 8_000 },
       'seven_day' => { 'used_percentage' => 103, 'resets_at' => Time.new(2026, 9, 24, 22, 0, 0).to_i },
     } }
-    assert_equal "#{RED}API 9/24 10:00pm#{RESET}", rate_limit_str(data)
+    assert_equal "#{RED}API 9/24 10:00pm#{RESET}", rate_limit_str(ClaudeSession.new(data))
   end
 
   def test_rate_limit_both_maxed_seven_day_wins
@@ -191,7 +196,7 @@ class StatuslineTest < Minitest::Test
       'five_hour' => { 'used_percentage' => 100, 'resets_at' => five_resets },
       'seven_day' => { 'used_percentage' => 100, 'resets_at' => seven_resets },
     } }
-    out = rate_limit_str(data)
+    out = rate_limit_str(ClaudeSession.new(data))
     assert_equal "#{RED}API 9/27 07:40pm#{RESET}", out
     refute_includes out, FMT_CLOCK[five_resets, false] # the "moot" 5h reset is not shown at all
   end
@@ -502,14 +507,22 @@ class StatuslineTest < Minitest::Test
   end
 
   # --- cache clock: green, turquoise under CACHE_LOW_SECS, red once expired ---
+  def cache_expiring(at)
+    ClaudeSession.new('prompt_cache' => { 'expires_at' => at })
+  end
+
+  def test_cache_clock_says_expired_once_past
+    assert_includes cache_str(cache_expiring(Time.now.to_i - 5)), "#{RED}EXPIRED"
+  end
+
   def test_cache_clock_turns_turquoise_under_two_minutes
     soon = Time.now.to_i + 60
-    assert_includes cache_str(soon), "#{TURQUOISE}#{FMT_CLOCK[soon, false]}"
+    assert_includes cache_str(cache_expiring(soon)), "#{TURQUOISE}#{FMT_CLOCK[soon, false]}"
   end
 
   def test_cache_clock_is_green_with_time_left
     later = Time.now.to_i + 600
-    assert_includes cache_str(later), "#{GREEN}#{FMT_CLOCK[later, false]}"
+    assert_includes cache_str(cache_expiring(later)), "#{GREEN}#{FMT_CLOCK[later, false]}"
   end
 
   def test_ctx_icon_takes_the_zone_color
@@ -568,5 +581,32 @@ class StatuslineTest < Minitest::Test
   def test_snapshot_small
     expected = '{green}▣{green} 120.3k ⛁ {green}11:05am         ◷ 3h {green}40%  ◷ 6d {green} 5%'
     assert_equal expected, snapshot_line(50)
+  end
+
+  # --- ClaudeSession: the value object the displays read from ---
+  def test_claude_session_reads_plain_fields
+    session = ClaudeSession.new(layout_data)
+    assert_equal 210_000, session.ctx
+    assert_equal 1_000_000, session.window_size
+    assert_equal 1.5, session.cost
+    assert_equal 'Sonnet 5', session.model_name
+    assert_equal 40, session.five_pct
+    assert session.limits?
+  end
+
+  def test_claude_session_defaults_when_data_is_empty
+    session = ClaudeSession.new({})
+    assert_equal 0, session.ctx
+    assert_equal 0, session.five_pct
+    refute session.limits?
+    assert_nil session.turn
+    assert_nil session.cache_expires_at
+  end
+
+  def test_claude_session_expected_pace_is_a_percent
+    on_pace_monday do |now|
+      session = ClaudeSession.new('rate_limits' => { 'five_hour' => { 'used_percentage' => 10, 'resets_at' => now + 9_000 } })
+      assert_in_delta 50, session.five_expected, 0.01
+    end
   end
 end
