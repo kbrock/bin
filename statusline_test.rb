@@ -27,6 +27,83 @@ class StatuslineTest < Minitest::Test
     Time.stub(:now, now) { yield now.to_i }
   end
 
+  # --- calc_tier: the last lower bound at or below the value ---
+  TIERS = { 0 => :good, 80_000 => :multi_hop, 200_000 => :degraded }.freeze
+
+  def test_calc_tier_first_tier_covers_zero_up_to_the_next_bound
+    assert_equal :good, calc_tier(0, TIERS)
+    assert_equal :good, calc_tier(79_999, TIERS)
+  end
+
+  def test_calc_tier_a_bound_belongs_to_the_tier_it_starts
+    assert_equal :multi_hop, calc_tier(80_000, TIERS)
+    assert_equal :degraded, calc_tier(200_000, TIERS)
+  end
+
+  def test_calc_tier_past_the_last_bound_stays_in_the_last_tier
+    assert_equal :degraded, calc_tier(5_000_000, TIERS)
+  end
+
+  def test_calc_tier_nil_below_the_first_bound
+    assert_nil calc_tier(-1, TIERS)
+  end
+
+  def test_calc_tier_negative_bounds_and_unsorted_input
+    pace = { 10 => :ahead, -10 => :behind, 0 => :on_pace }
+    assert_equal :behind, calc_tier(-5, pace)
+    assert_equal :on_pace, calc_tier(5, pace)
+    assert_equal :ahead, calc_tier(10, pace)
+  end
+
+  # --- paint: no color means plain text ---
+  def test_paint_nil_color_is_plain
+    assert_equal 'x', paint(nil, 'x')
+    assert_equal 'x', paint('', 'x')
+    assert_equal "#{RED}x#{RESET}", paint(RED, 'x')
+  end
+
+  # --- ctx_tier: the model's zones by name, :compact past 85% of the window ---
+  def ctx_tier_for(ctx, model = 'Claude Sonnet 5', window = 1_000_000)
+    ClaudeSession.new('context_window' => { 'total_input_tokens' => ctx, 'context_window_size' => window },
+                      'model' => { 'display_name' => model }).ctx_tier
+  end
+
+  def test_ctx_tier_sonnet_zones
+    assert_equal :good, ctx_tier_for(50_000)
+    assert_equal :multi_hop, ctx_tier_for(100_000)
+    assert_equal :degraded, ctx_tier_for(250_000)
+    assert_equal :fried, ctx_tier_for(450_000)
+  end
+
+  def test_ctx_tier_opus_zones
+    assert_equal :good, ctx_tier_for(100_000, 'Claude Opus 5.5')
+    assert_equal :degraded, ctx_tier_for(400_000, 'Claude Opus 5.5')
+  end
+
+  def test_ctx_tier_unknown_model_uses_fallback_zones
+    assert_equal :good, ctx_tier_for(10_000, 'gpt-4')
+    assert_equal :fried, ctx_tier_for(160_000, 'gpt-4')
+  end
+
+  def test_ctx_tier_compact_starts_at_85_percent
+    assert_equal :fried, ctx_tier_for(849_999)
+    assert_equal :compact, ctx_tier_for(850_000)
+    assert_equal :compact, ctx_tier_for(860_000)
+  end
+
+  def test_ctx_tier_compact_is_a_ceiling_over_later_zones
+    # Opus degraded starts at 350k, but compact (340k of a 400k window) comes first
+    assert_equal :compact, ctx_tier_for(345_000, 'Claude Opus 5.5', 400_000)
+    session = ClaudeSession.new('context_window' => { 'context_window_size' => 400_000 },
+                                'model' => { 'display_name' => 'Claude Opus 5.5' })
+    assert_equal %i[good multi_hop compact], session.ctx_tiers.values
+  end
+
+  def test_ctx_tier_without_a_window_size_has_no_compact
+    assert_equal %i[good multi_hop degraded fried], ClaudeSession.new('model' => { 'display_name' => 'Claude Opus 5.5' }).ctx_tiers.values
+    assert_equal :fried, ctx_tier_for(5_000_000, 'Claude Opus 5.5', 0)
+  end
+
   # --- model_level: Sonnet (80k / 200k / 400k) ---
   def test_sonnet_good
     assert_equal 0, model_level(50_000, 'Claude Sonnet 5')
@@ -76,43 +153,17 @@ class StatuslineTest < Minitest::Test
     assert_equal 3, model_level(160_000, 'gpt-4')
   end
 
-  # --- physical_alert?: 15% free threshold, independent of model ---
-  def test_physical_plenty_of_room
-    refute physical_alert?(500_000, 1_000_000) # 50% free
+  # --- THEME: a fried context is plain red, only :compact is bold ---
+  def test_theme_colors_for_the_context_tiers
+    assert_equal GREEN, THEME[:good]
+    assert_equal RED, THEME[:fried]
+    assert_equal BOLD_RED, THEME[:compact]
   end
 
-  def test_physical_checkpoint_near_boundary
-    assert physical_alert?(860_000, 1_000_000) # ~86% used, past the 85% rule-of-thumb line
-  end
-
-  def test_physical_not_yet_at_boundary
-    refute physical_alert?(800_000, 1_000_000) # 80% used, still under the line
-  end
-
-  def test_physical_ignores_zero_window
-    refute physical_alert?(500_000, 0)
-  end
-
-  # --- ctx_color: physical overrides model, red never becomes bold on its own ---
-  def ctx_session(ctx, model, window)
-    ClaudeSession.new('context_window' => { 'total_input_tokens' => ctx, 'context_window_size' => window },
-                      'model' => { 'display_name' => model })
-  end
-
-  def test_color_good_is_green
-    assert_equal GREEN, ctx_color(ctx_session(10_000, 'Claude Sonnet 5', 1_000_000))
-  end
-
-  def test_color_model_fried_is_plain_red_not_bold
-    # ctx=450k trips Sonnet's degraded threshold (400k), but window is huge so plenty of physical room
-    assert_equal RED, ctx_color(ctx_session(450_000, 'Claude Sonnet 5', 1_000_000))
-  end
-
-  def test_color_physical_checkpoint_overrides_low_model_level
-    # ctx=300k is under Opus's degraded (600k) and multi_hop (350k) thresholds -- model_level is only 1 (blue) --
-    # but a small window (340k) puts ~88% used, so physical wins and forces bold red
-    assert_equal 1, model_level(300_000, 'Claude Opus 5.5')
-    assert_equal BOLD_RED, ctx_color(ctx_session(300_000, 'Claude Opus 5.5', 340_000))
+  def test_ctx_icon_is_bold_red_once_compact
+    data = { 'context_window' => { 'total_input_tokens' => 860_000, 'context_window_size' => 1_000_000 },
+             'model' => { 'display_name' => 'Opus 5.5' } }
+    assert_includes render(data), "#{BOLD_RED}▣"
   end
 
   # --- FMT_LEFT: single unit, always rounded UP ---
@@ -588,6 +639,7 @@ class StatuslineTest < Minitest::Test
     session = ClaudeSession.new(layout_data)
     assert_equal 210_000, session.ctx
     assert_equal 1_000_000, session.window_size
+    assert_in_delta 21, session.ctx_percent, 0.01
     assert_equal 1.5, session.cost
     assert_equal 'Sonnet 5', session.model_name
     assert_equal 40, session.five_pct
@@ -597,6 +649,7 @@ class StatuslineTest < Minitest::Test
   def test_claude_session_defaults_when_data_is_empty
     session = ClaudeSession.new({})
     assert_equal 0, session.ctx
+    assert_equal 0, session.ctx_percent
     assert_equal 0, session.five_pct
     refute session.limits?
     assert_nil session.turn

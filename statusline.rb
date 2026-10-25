@@ -128,7 +128,13 @@ BLUE, YELLOW, RED, BOLD_RED, PURPLE, GREEN, RESET =
   "\e[34m", "\e[33m", "\e[31m", "\e[1;31m", "\e[38;5;135m", "\e[32m", "\e[0m"
 
 def paint(color, str)
-  color.empty? ? str : "#{color}#{str}#{RESET}"
+  color.to_s.empty? ? str : "#{color}#{str}#{RESET}"
+end
+
+# The name of the tier a value falls in. tiers maps each tier's lower bound to
+# its name: { 0 => :good, 80_000 => :multi_hop }. nil when below the first bound.
+def calc_tier(value, tiers)
+  tiers.select { |from, _| from <= value }.max_by { |from, _| from }&.last
 end
 
 def color_limits(v, str, yellow, red, low = '')
@@ -136,6 +142,17 @@ def color_limits(v, str, yellow, red, low = '')
 end
 
 MODEL_COLORS = [GREEN, BLUE, YELLOW, RED].freeze
+
+# Tier name to color. The session names what a value means; this decides how it looks.
+THEME = {
+  good: GREEN, multi_hop: BLUE, degraded: YELLOW, fried: RED, compact: BOLD_RED
+}.freeze
+
+CTX_TIER_NAMES = %i[good multi_hop degraded fried].freeze
+
+# Autocompact hits ~5% free. Trip :compact at 15% free: ten points of headroom
+# to act (save notes, flag surprises) before the wipe.
+CTX_COMPACT_PERCENT = 85
 
 # Reasoning-quality zone by model. Sonnet 5.5 vs Opus 5.5
 def model_zones(model_name)
@@ -158,18 +175,6 @@ def model_level(ctx, model_name)
   return 2 if ctx >= multi_hop
   return 1 if ctx >= good_max
   0
-end
-# Physical ceiling: true autocompact hits ~5% free. Trip this at 15% free —
-# ten points of headroom to actually act (save notes, flag surprises)
-# before the wipe, not a warning that it already happened.
-def physical_alert?(ctx, window_size)
-  return false if window_size <= 0
-  (ctx.to_f / window_size) >= 0.85
-end
-
-def ctx_color(session)
-  return BOLD_RED if session.ctx_alert?
-  MODEL_COLORS[session.ctx_level]
 end
 
 # [used %, resets_at]; a window with no activity yet (5h first thing in the morning) is 0%
@@ -344,31 +349,33 @@ end
 
 SHOW_TURN = true
 
-def usage_str(session, wide = false, size = true, extras = true)
-  ctx, cost = session.ctx, session.cost
-  warm = session.cache_warm
+# "▣ ▰▰▱▱ 120.3k": the ▣ takes the size's color (so the 85% alert shows without
+# the number). wide adds the bar, size adds the number.
+def context_str(session, wide = false, size = true)
+  color = THEME[session.ctx_tier]
+  str   = paint(color, '▣')
+  str  += " #{ctx_slots(session)}" if wide
+  str  += paint(color, FMT_CTX[session.ctx]) if size
+  str
+end
 
-  # Per-turn ▲▼⚒ took a while to tune: DO NOT DELETE. Set SHOW_TURN to false to
-  # hide it (it also skips reading the transcript).
-  turn_str = ''
-  if SHOW_TURN && extras
-    if (turn = session.turn)
-      tool_in, down, warm, tools = turn[:up], turn[:down], turn[:warm], turn[:tools]
-    else
-      tool_in, down, tools = session.cache_created, session.output_tokens, 0
-    end
-    up_str   = paint(warm.nil? ? '' : warm ? BLUE : RED, "▲#{FMT_TOKENS[tool_in]}")
-    down_str = paint(PURPLE, "▼#{FMT_TOKENS[down]}")
-    turn_str = "#{up_str} #{down_str} ⚒#{tools}  "
+# "▲200 ▼300 ⚒2": tokens for this whole turn. nil when SHOW_TURN is false.
+# Per-turn ▲▼⚒ took a while to tune: DO NOT DELETE. Set SHOW_TURN to false to
+# hide it (it also skips reading the transcript).
+def turn_str(session)
+  return nil unless SHOW_TURN
+  if (turn = session.turn)
+    up, down, warm, tools = turn[:up], turn[:down], turn[:warm], turn[:tools]
+  else
+    up, down, warm, tools = session.cache_created, session.output_tokens, session.cache_warm, 0
   end
+  up_str   = paint(warm.nil? ? '' : warm ? BLUE : RED, "▲#{FMT_TOKENS[up]}")
+  down_str = paint(PURPLE, "▼#{FMT_TOKENS[down]}")
+  "#{up_str} #{down_str} ⚒#{tools}"
+end
 
-  ctx_col  = ctx_color(session)
-  # the ▣ takes the size's color (so the 85% alert shows without the number)
-  ctx_str  = paint(ctx_col, '▣')
-  ctx_str += " #{ctx_slots(session)}" if wide
-  ctx_str += paint(ctx_col, FMT_CTX[ctx]) if size
-  # ▲▼⚒ sit just left of the cost
-  [ctx_str, extras ? "#{turn_str}#{paint(MUTED, format('$%.2f', cost))}" : nil]
+def cost_str(session)
+  paint(MUTED, format('$%.2f', session.cost))
 end
 
 # [warm, expires_at]; nil when there is no cache
@@ -513,12 +520,27 @@ class ClaudeSession
     @ctx_zones ||= model_zones(model_name)
   end
 
-  def ctx_level
-    model_level(ctx, model_name)
+  # Named tiers for ctx: the model's zones, then :compact once ctx fills
+  # CTX_COMPACT_PERCENT of the window (a ceiling: later zones are dropped).
+  # { 0 => :good, 150_000 => :multi_hop, ..., 850_000.0 => :compact }
+  def ctx_tiers
+    @ctx_tiers ||= begin
+      tiers = ([0] + model_zones(model_name)).zip(CTX_TIER_NAMES).to_h
+      if window_size > 0
+        compact_at = window_size * CTX_COMPACT_PERCENT / 100.0
+        tiers = tiers.reject { |from, _| from >= compact_at }
+        tiers[compact_at] = :compact
+      end
+      tiers
+    end
   end
 
-  def ctx_alert?
-    physical_alert?(ctx, window_size)
+  def ctx_tier
+    calc_tier(ctx, ctx_tiers)
+  end
+
+  def ctx_percent
+    window_size > 0 ? ctx * 100.0 / window_size : 0
   end
 
   def window_size
@@ -674,12 +696,12 @@ end
 # condensed: ✔ repo branch #pr  ▣ ctx ⛁ clock                   $cost  ◷ 5h ⣿⡏⠀⠀  ◷ 7d ⠇⠀⠀⠀  ⬢ model
 def layout(data, wide, size, extras)
   session = ClaudeSession.new(data)
-  usage, cost = usage_str(session, wide, size, extras)
-  ctx_clock = "#{usage} #{cache_str(session)}".rstrip
+  ctx_clock = [context_str(session, wide, size), cache_str(session)].compact.join(' ')
+  usage     = extras ? [turn_str(session), cost_str(session)].compact.join('  ') : nil
   model     = "⬢ #{model_str(session)}"
   rates     = rate_limit_str(session, wide)
 
-  [[git_str(session, wide), ctx_clock].compact.join('  '), [[cost, rates].compact.join('  '), (model if extras)].compact.join('  ')]
+  [[git_str(session, wide), ctx_clock].compact.join('  '), [[usage, rates].compact.join('  '), (model if extras)].compact.join('  ')]
 end
 
 # Tried in order: [bars, ctx size, ▲▼⚒ $cost model]
