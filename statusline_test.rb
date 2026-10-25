@@ -736,4 +736,24 @@ class StatuslineTest < Minitest::Test
   def test_limit_tier_without_a_pace_is_on_pace
     assert_equal :on_pace, ClaudeSession.new('rate_limits' => { 'five_hour' => { 'used_percentage' => 50 } }).five_tier
   end
+
+  # --- ClaudeSession cache tier: :warm, :cooling under CACHE_LOW_SECS, :expired ---
+  def cache_tier_in(seconds_left)
+    on_pace_monday do |now|
+      ClaudeSession.new('prompt_cache' => { 'expires_at' => now + seconds_left }).cache_tier
+    end
+  end
+
+  def test_cache_tier_names
+    assert_equal :warm, cache_tier_in(600)
+    assert_equal :warm, cache_tier_in(CACHE_LOW_SECS)
+    assert_equal :cooling, cache_tier_in(CACHE_LOW_SECS - 1)
+    assert_equal :cooling, cache_tier_in(1)
+    assert_equal :expired, cache_tier_in(0)
+    assert_equal :expired, cache_tier_in(-30)
+  end
+
+  def test_cache_tier_nil_without_a_cache
+    assert_nil ClaudeSession.new({}).cache_tier
+  end
 end

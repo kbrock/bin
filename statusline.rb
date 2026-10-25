@@ -143,13 +143,6 @@ end
 
 MODEL_COLORS = [GREEN, BLUE, YELLOW, RED].freeze
 
-# Tier name to color. The session names what a value means; this decides how it looks.
-THEME = {
-  good: GREEN, multi_hop: BLUE, degraded: YELLOW, fried: RED, compact: BOLD_RED,
-  cache_hit: BLUE, cache_miss: RED,
-  behind: GREEN, on_pace: GREEN, ahead: PURPLE, wall: RED
-}.freeze
-
 CTX_TIER_NAMES = %i[good multi_hop degraded fried].freeze
 
 # Autocompact hits ~5% free. Trip :compact at 15% free: ten points of headroom
@@ -278,7 +271,7 @@ def rate_limit_str(session, wide = false)
     # in the meantime, you're still gated by 7d, so that's the only reset
     # worth knowing about. Percentage is dropped — it's just 100%, not info.
     clock = session.seven_pct >= 100 ? FMT_CLOCK[session.seven_resets, true] : FMT_CLOCK[session.five_resets, false]
-    return paint(RED, "API #{clock}")
+    return paint(THEME[:api], "API #{clock}")
   end
 
   "#{limit_bar(session.five_pct, session.five_resets, '5h', session.five_expected, session.five_tier, wide)}  #{limit_bar(session.seven_pct, session.seven_resets, '7d', session.seven_expected, session.seven_tier, wide)}"
@@ -368,7 +361,7 @@ def turn_str(session)
 end
 
 def cost_str(session)
-  paint(MUTED, format('$%.2f', session.cost))
+  paint(THEME[:cost], format('$%.2f', session.cost))
 end
 
 # [warm, expires_at]; nil when there is no cache
@@ -390,16 +383,27 @@ CYAN, BOLD_BLUE, TURQUOISE = "\e[36m", "\e[1;34m", "\e[38;5;80m"
 # draws the eye, and the zone colors (green/blue/yellow/red) must keep their meaning.
 MUTED = "\e[38;5;67m"
 
+# Name to color. The session names what a value means (a tier, an effort level,
+# a git state); this decides how it looks. The last group are fixed-color text.
+THEME = {
+  good: GREEN, multi_hop: BLUE, degraded: YELLOW, fried: RED, compact: BOLD_RED,
+  cache_hit: BLUE, cache_miss: RED,
+  behind: GREEN, on_pace: GREEN, ahead: PURPLE, wall: RED,
+  warm: GREEN, cooling: TURQUOISE, expired: RED,
+  detached: RED, dirty: YELLOW, stash: YELLOW, unpushed: CYAN, behind_upstream: CYAN, synced: GREEN,
+  high: YELLOW, xhigh: RED, max: RED,
+  cost: MUTED, model: MUTED, api: RED
+}.freeze
+
 EFFORT_ARROWS = { 'low' => '↓', 'medium' => '→', 'high' => '↑', 'xhigh' => '⇑', 'max' => '⇈' }.freeze
-EFFORT_COLORS = { 'high' => YELLOW, 'xhigh' => RED, 'max' => RED }.freeze
 
 # "Opus ⇑": model name without the version, then an arrow for effort
 # (colored when xhigh/max). Medium and models without effort get no arrow.
 def model_str(session)
-  name  = paint(MUTED, session.model_name.to_s[/\A[A-Za-z]+/].to_s)
+  name  = paint(THEME[:model], session.model_name.to_s[/\A[A-Za-z]+/].to_s)
   level = session.effort
   return name if level.nil? || level == 'medium'
-  "#{name} #{paint(EFFORT_COLORS.fetch(level, ''), EFFORT_ARROWS.fetch(level, level[0]))}"
+  "#{name} #{paint(THEME[level.to_sym], EFFORT_ARROWS.fetch(level, level[0]))}"
 end
 
 # Same walk as the PS1 in dotfiles/bashrc.d/git-prompt.sh: find .git by walking
@@ -427,7 +431,7 @@ end
 
 # One symbol, the first that applies, shown left of the repo name:
 # The first that applies: :detached, :dirty (any local change, staged or not),
-# :stash, :unpushed (or no upstream), :behind, :synced. nil if git fails.
+# :stash, :unpushed (or no upstream), :behind_upstream, :synced. nil if git fails.
 # Ahead/behind are as of the last fetch: no network.
 def git_status(root)
   out = IO.popen(['git', '-C', root, 'status', '--porcelain=v2', '--branch', '--show-stash', err: File::NULL], &:readlines)
@@ -443,15 +447,14 @@ def git_status(root)
   elsif dirty                       then :dirty
   elsif stash > 0                   then :stash
   elsif !upstream || ahead.to_i > 0 then :unpushed
-  elsif behind.to_i > 0             then :behind
+  elsif behind.to_i > 0             then :behind_upstream
   else :synced
   end
 end
 
-# One symbol, shown left of the repo name: [color, glyph]
-GIT_STATE_MARKS = {
-  detached: [RED, '✖'], dirty: [YELLOW, '✚'], stash: [YELLOW, '⚑'],
-  unpushed: [CYAN, '↑'], behind: [CYAN, '↓'], synced: [GREEN, '✔']
+# One symbol, shown left of the repo name
+GIT_STATE_GLYPHS = {
+  detached: '✖', dirty: '✚', stash: '⚑', unpushed: '↑', behind_upstream: '↓', synced: '✔'
 }.freeze
 
 BRANCH_MAX = 24
@@ -473,8 +476,8 @@ end
 def git_str(session, wide = false)
   root, branch, linked = session.git_root, session.git_branch, session.git_linked?
   return nil unless root
-  mark = GIT_STATE_MARKS[session.git_state]
-  state = mark && paint(*mark)
+  tier  = session.git_state
+  state = GIT_STATE_GLYPHS[tier] && paint(THEME[tier], GIT_STATE_GLYPHS[tier])
   name = paint(BOLD_BLUE, File.basename(root))
   text = branch.length > BRANCH_MAX ? "#{branch[0, BRANCH_MAX - 1]}…" : branch
   if wide
@@ -603,12 +606,14 @@ class ClaudeSession
     cache&.last
   end
 
-  def cache_expired?
-    !!cache_expires_at && cache_expires_at <= Time.now.to_i
-  end
-
   def cache_seconds_left
     cache_expires_at && cache_expires_at - Time.now.to_i
+  end
+
+  # :warm, :cooling (under CACHE_LOW_SECS left) or :expired; nil with no cache
+  def cache_tier
+    seconds = cache_seconds_left
+    seconds && calc_tier(seconds, CACHE_TIERS)
   end
 
   def pr_number
@@ -705,16 +710,14 @@ end
 # Under this the clock turns turquoise: a nudge, not an alarm (the expiry keeps
 # getting pushed out, so yellow would fire too often)
 CACHE_LOW_SECS = 120
+CACHE_TIERS = { -Float::INFINITY => :expired, 1 => :cooling, CACHE_LOW_SECS => :warm }.freeze
 
 # Sits right after ctx (▣ is the icon for both); red once the cache is gone
 def cache_str(session)
-  expires_at = session.cache_expires_at
-  return nil unless expires_at
-  clock = if session.cache_expired? then paint(RED, 'EXPIRED')
-          elsif session.cache_seconds_left < CACHE_LOW_SECS then paint(TURQUOISE, FMT_CLOCK[expires_at, false])
-          else paint(GREEN, FMT_CLOCK[expires_at, false])
-          end
-  "⛁ #{clock}"
+  tier = session.cache_tier
+  return nil unless tier
+  text = tier == :expired ? 'EXPIRED' : FMT_CLOCK[session.cache_expires_at, false]
+  "⛁ #{paint(THEME[tier], text)}"
 end
 
 # => [left, right]
