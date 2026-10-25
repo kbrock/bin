@@ -516,4 +516,57 @@ class StatuslineTest < Minitest::Test
     data = layout_data # 210k on Sonnet is the yellow zone
     assert_includes render(data), "#{YELLOW}▣"
   end
+
+  # --- render: whole-line snapshots ---
+  # Everything on screen for one fixed input: Opus, 120k ctx, warm cache, 5h at
+  # 40% (3h left, on pace), 7d at 5% (Monday 11am). Colors show as {name} tags.
+  # These pin the output across refactors of how the line is built.
+  SNAPSHOT_COLORS = {
+    BLUE => 'blue', YELLOW => 'yellow', RED => 'red', BOLD_RED => 'bold_red', PURPLE => 'purple',
+    GREEN => 'green', BRIGHT_GREEN => 'bright_green', DIM_GREEN => 'dim_green', MUTED => 'muted',
+    TURQUOISE => 'turquoise', RESET => ''
+  }.freeze
+
+  def tagged(str)
+    str.gsub(/\e\[[0-9;]*m/) { |c| SNAPSHOT_COLORS.key?(c) ? (SNAPSHOT_COLORS[c].empty? ? '' : "{#{SNAPSHOT_COLORS[c]}}") : c.inspect }
+  end
+
+  def snapshot_line(columns)
+    ENV['COLUMNS'] = columns.to_s
+    on_pace_monday do |now|
+      data = {
+        'workspace' => { 'current_dir' => Dir.tmpdir }, # not a git repo
+        'context_window' => {
+          'current_usage' => { 'cache_creation_input_tokens' => 200, 'cache_read_input_tokens' => 5000 },
+          'total_input_tokens' => 120_000, 'total_output_tokens' => 300, 'context_window_size' => 1_000_000
+        },
+        'cost' => { 'total_cost_usd' => 0.42 },
+        'model' => { 'display_name' => 'Opus 5.5' }, 'effort' => { 'level' => 'xhigh' },
+        'prompt_cache' => { 'warm' => true, 'expires_at' => now + 300 },
+        'rate_limits' => {
+          'five_hour' => { 'used_percentage' => 40, 'resets_at' => now + 3 * 3600 },
+          'seven_day' => { 'used_percentage' => 5, 'resets_at' => now + 5 * 86_400 + 22 * 3600 }
+        }
+      }
+      tagged(render(data))
+    end
+  end
+
+  def test_snapshot_large
+    expected = '{green}▣ {green}▰{green}▰{green}▱{blue}▱{blue}▱{blue}▱{blue}▱{yellow}▱{yellow}▱{yellow}▱{yellow}▱{yellow}▱{red}▱{red}▱' \
+               '{green} 120.3k ⛁ {green}11:05am <gap> {blue}▲200 {purple}▼300 ⚒0  {muted}$0.42  ' \
+               '◷ 3h  {green}▰{green}▰{dim_green}▱{dim_green}▱{dim_green}▱  ◷ 6d  {green}▰{dim_green}▱{dim_green}▱{dim_green}▱{dim_green}▱  ⬢ {muted}Opus {red}⇑'
+    assert_equal expected, snapshot_line(174).sub(/ {10,}/, ' <gap> ')
+  end
+
+  def test_snapshot_medium
+    expected = '{green}▣ {green}▰{green}▰{green}▱{blue}▱{blue}▱{blue}▱{blue}▱{yellow}▱{yellow}▱{yellow}▱{yellow}▱{yellow}▱{red}▱{red}▱ ' \
+               '⛁ {green}11:05am  ◷ 3h  {green}▰{green}▰{dim_green}▱{dim_green}▱{dim_green}▱  ◷ 6d  {green}▰{dim_green}▱{dim_green}▱{dim_green}▱{dim_green}▱'
+    assert_equal expected, snapshot_line(100)
+  end
+
+  def test_snapshot_small
+    expected = '{green}▣{green} 120.3k ⛁ {green}11:05am         ◷ 3h {green}40%  ◷ 6d {green} 5%'
+    assert_equal expected, snapshot_line(50)
+  end
 end
