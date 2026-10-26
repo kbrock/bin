@@ -596,7 +596,7 @@ end
   end
 
   def test_snapshot_small
-    expected = '{green}▣{green}   120k ⛁ {green}11:05am         ◷ 3h {green}40%  ◷ 6d {green} 5%'
+    expected = '{green}▣{green}   120k ⛁ {green}11:05am         ◷ 3h {green}40%  ◷ 6d {bright_green} 5%'
     assert_equal expected, snapshot_line(50)
   end
 

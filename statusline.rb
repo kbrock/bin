@@ -165,9 +165,6 @@ end
 LIMIT_WALL = { 90 => :wall }.freeze
 LIMIT_PACE = { -Float::INFINITY => :behind, 0 => :on_pace, 10 => :ahead }.freeze
 
-BRIGHT_GREEN = "\e[1;92m"
-DIM_GREEN    = "\e[38;5;65m"
-
 # pace is linear: the share of the window already elapsed
 def five_hour_pace(resets_at)
   return nil unless resets_at
@@ -184,19 +181,14 @@ end
 # 5 slots, 20% each; any use shows at least one, full only at 100%.
 # Behind pace, the window up to and including the block you're in is bright:
 # the used slots (solid) and the catch-up room (hollow). The rest is dim.
-def limit_slots(pct, pace, color)
+def limit_slots(pct, pace, tier)
   filled = (pct / 20.0).round
   filled = [filled, 1].max if pct > 0
   filled = [filled, 4].min if pct < 100
   filled = [filled, 5].min
   due    = pace ? [(pace / 20.0).ceil, 5].min : 0
-  behind = color == GREEN && due > filled
-  (0...5).map do |k|
-    if    k < filled then paint(behind ? BRIGHT_GREEN : color, FILL)
-    elsif k < due    then paint(BRIGHT_GREEN, HOLLOW)
-    else                  paint(DIM_GREEN, HOLLOW)
-    end
-  end.join
+  used   = %i[behind on_pace].include?(tier) ? (due > filled ? :behind : :on_pace) : tier
+  bar(filled, [used] * 5, [:behind] * due + [:future] * (5 - due))
 end
 
 # time left, then % used as a bar (wide) or a number (narrow), in the pace color
@@ -206,7 +198,7 @@ def limit_bar(pct, resets, fallback, pace, tier, wide)
   label = fallback if label.empty?
   # narrow: the % is right-aligned in 3 so "3h  5%" and "3d 42%" use one space for 2 digits
   return "◷ #{label} #{paint(color, format('%3s', "#{pct.round}%"))}" unless wide
-  "◷ #{label.ljust(3)} #{limit_slots(pct, pace, color)}"
+  "◷ #{label.ljust(3)} #{limit_slots(pct, pace, tier)}"
 end
 
 def rate_limit_str(session, wide = false)
@@ -263,6 +255,11 @@ end
 # ▲ blue = turn's first send hit a warm cache, red = cold (paid full price to re-send)
 # Slot width = degraded size / count, so every zone edge lands on a slot edge:
 # Sonnet 10 x 40k, Opus 12 x 50k.
+# One slot per entry: solid in on[k] if k < filled, else hollow in off[k] (theme names)
+def bar(filled, on, off)
+  on.each_index.map { |k| k < filled ? paint(THEME[on[k]], FILL) : paint(THEME[off[k]], HOLLOW) }.join
+end
+
 RED_SLOTS = 2 # extra slots past degraded, same width
 # Every slot has the color of its band (the zone at the slot's start): solid
 # when ctx has reached it, hollow when it is still ahead.
@@ -270,11 +267,8 @@ def ctx_slots(session)
   count = ctx_model(session.model_name)[:slots]
   width = session.ctx_zones[2].to_f / count
   count += RED_SLOTS # the red zone starts at degraded, so it needs slots of its own
-  lit   = [(session.ctx / width).floor, count].min
-  (1..count).map do |k|
-    band = THEME[calc_tier(((k - 1) * width).to_i, session.ctx_zone_tiers)]
-    k <= lit ? paint(band, FILL) : paint(band, HOLLOW)
-  end.join
+  bands = (0...count).map { |k| calc_tier((k * width).to_i, session.ctx_zone_tiers) }
+  bar([(session.ctx / width).floor, count].min, bands, bands)
 end
 
 SHOW_TURN = true
@@ -321,13 +315,15 @@ CYAN, BOLD_BLUE, TURQUOISE = "\e[36m", "\e[1;34m", "\e[38;5;80m"
 # Quiet color for info that is never a warning ($cost, model name): plain text
 # draws the eye, and the zone colors (green/blue/yellow/red) must keep their meaning.
 MUTED = "\e[38;5;67m"
+BRIGHT_GREEN = "\e[1;92m"
+DIM_GREEN    = "\e[38;5;65m"
 
 # Name to color. The session names what a value means (a tier, an effort level,
 # a git state); this decides how it looks. The last group are fixed-color text.
 THEME = {
   good: GREEN, multi_hop: BLUE, degraded: YELLOW, fried: RED, compact: BOLD_RED,
   cache_hit: BLUE, cache_miss: RED,
-  behind: GREEN, on_pace: GREEN, ahead: PURPLE, wall: RED,
+  behind: BRIGHT_GREEN, future: DIM_GREEN, on_pace: GREEN, ahead: PURPLE, wall: RED,
   warm: GREEN, cooling: TURQUOISE, expired: RED,
   high: YELLOW, xhigh: RED, max: RED,
   cost: MUTED, model: MUTED, api: RED
