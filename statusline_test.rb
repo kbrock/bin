@@ -515,7 +515,7 @@ class StatuslineTest < Minitest::Test
   def test_large_layout_shows_everything
     ENV['COLUMNS'] = '174'
     out = plain(render(layout_data))
-    assert_includes out, '▰▰▰▰▰▱▱▱▱▱▱▱ 210.0k'
+    assert_includes out, '▰▰▰▰▰▱▱▱▱▱▱▱   210k'
     assert_includes out, '▲0 ▼0 ⚒0'
     assert_includes out, '$1.50'
     assert_includes out, '⬢ Sonnet'
@@ -526,7 +526,7 @@ class StatuslineTest < Minitest::Test
     ENV['COLUMNS'] = '173'
     out = plain(render(layout_data))
     assert_includes out, '▣ ▰▰▰▰▰▱▱▱▱▱▱▱  ◷ 2h  ▰▰▱▱▱  ◷ 3d  ▰▱▱▱▱'
-    %w[210.0k ▲ ▼ ⚒ $1.50 ⬢].each { |hidden| refute_includes out, hidden }
+    %w[210k ▲ ▼ ⚒ $1.50 ⬢].each { |hidden| refute_includes out, hidden }
     assert out.length < 80, 'right group stays next to the left, not at the edge'
   end
 
@@ -538,7 +538,7 @@ class StatuslineTest < Minitest::Test
   def test_small_layout_has_size_and_percentages_only
     ENV['COLUMNS'] = '81'
     out = plain(render(layout_data))
-    assert_includes out, '▣ 210.0k'
+    assert_includes out, '▣   210k'
     assert_includes out, '◷ 2h 40%  ◷ 3d 20%'
     %w[▰ ▲ $1.50 ⬢].each { |hidden| refute_includes out, hidden }
     assert_equal 81 - RIGHT_MARGIN, out.length
@@ -618,7 +618,7 @@ class StatuslineTest < Minitest::Test
 
   def test_snapshot_large
     expected = '{green}▣ {green}▰{green}▰{green}▱{blue}▱{blue}▱{blue}▱{blue}▱{yellow}▱{yellow}▱{yellow}▱{yellow}▱{yellow}▱{red}▱{red}▱' \
-               '{green} 120.3k ⛁ {green}11:05am <gap> {blue}▲200 {purple}▼300 ⚒0  {muted}$0.42  ' \
+               '{green}   120k ⛁ {green}11:05am <gap> {blue}▲200 {purple}▼300 ⚒0  {muted}$0.42  ' \
                '◷ 3h  {green}▰{green}▰{dim_green}▱{dim_green}▱{dim_green}▱  ◷ 6d  {green}▰{dim_green}▱{dim_green}▱{dim_green}▱{dim_green}▱  ⬢ {muted}Opus {red}⇑'
     assert_equal expected, snapshot_line(174).sub(/ {10,}/, ' <gap> ')
   end
@@ -630,7 +630,7 @@ class StatuslineTest < Minitest::Test
   end
 
   def test_snapshot_small
-    expected = '{green}▣{green} 120.3k ⛁ {green}11:05am         ◷ 3h {green}40%  ◷ 6d {green} 5%'
+    expected = '{green}▣{green}   120k ⛁ {green}11:05am         ◷ 3h {green}40%  ◷ 6d {green} 5%'
     assert_equal expected, snapshot_line(50)
   end
 

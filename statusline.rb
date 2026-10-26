@@ -88,17 +88,14 @@ def dig_f(h, *path)
   (h.dig(*path) || 0).to_f
 end
 
-# ▲▼ tokens are at most 4 chars. Floored, not rounded, so 9999 stays "9.9k".
-# ctx is padded to a fixed width so the line doesn't jitter.
-FMT_TOKENS = ->(n) {
-  s = if n >= 1_000_000 then format('%.1fM', (n / 100_000) / 10.0)
-      elsif n >= 10_000 then "#{n / 1000}k"
-      elsif n >= 1_000  then format('%.1fk', (n / 100) / 10.0)
-      else n.to_s
-      end
-  s
+# At most 4 chars. Floored, not rounded, so 9999 stays "9.9k".
+FMT_COUNT = ->(n) {
+  if n >= 1_000_000 then format('%.1fM', (n / 100_000) / 10.0)
+  elsif n >= 10_000 then "#{n / 1000}k"
+  elsif n >= 1_000  then format('%.1fk', (n / 100) / 10.0)
+  else n.to_s
+  end
 }
-FMT_CTX = ->(n) { (n >= 1000 ? format('%.1fk', n / 1000.0) : n.to_s).rjust(7) }
 
 # Single unit, 5h22m -> "6h", not
 # This label doubles as the rate-limit's name (see rate_limit_str)
@@ -346,7 +343,7 @@ def context_str(session, wide = false, size = true)
   color = THEME[session.ctx_tier]
   str   = paint(color, '▣')
   str  += " #{ctx_slots(session)}" if wide
-  str  += paint(color, FMT_CTX[session.ctx]) if size
+  str  += paint(color, FMT_COUNT[session.ctx].rjust(7)) if size
   str
 end
 
@@ -355,8 +352,8 @@ end
 # hide it (it also skips reading the transcript).
 def turn_str(session)
   return nil unless SHOW_TURN
-  up_str   = paint(THEME[session.turn_cache_tier], "▲#{FMT_TOKENS[session.turn_up]}")
-  down_str = paint(PURPLE, "▼#{FMT_TOKENS[session.turn_down]}")
+  up_str   = paint(THEME[session.turn_cache_tier], "▲#{FMT_COUNT[session.turn_up]}")
+  down_str = paint(PURPLE, "▼#{FMT_COUNT[session.turn_down]}")
   "#{up_str} #{down_str} ⚒#{session.turn_tools}"
 end
 
