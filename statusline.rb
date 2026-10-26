@@ -199,14 +199,13 @@ def ctx_slots(session)
 end
 
 # "▣ ▰▰▱▱ 120k": the ▣ takes the size's color (so the 85% alert shows without
-# the number). wide adds the bar, size adds the number. The bar is scaled to the
+# the number). wide adds the bar. The bar is scaled to the
 # model's degraded size (Sonnet 10 slots of 40k, Opus 12 of 50k) plus RED_SLOTS past
 # it; each slot has its zone's color, solid once reached.
-def context_str(session, wide = false, size = true)
+def context_str(session, wide = false)
   str   = paint(session.ctx_tier, '▣')
   str  += " #{ctx_slots(session)}" if wide
-  str  += paint(session.ctx_tier, FMT_COUNT[session.ctx].rjust(7)) if size
-  str
+  str + paint(session.ctx_tier, FMT_COUNT[session.ctx].rjust(5))
 end
 
 # "▲200 ▼300 ⚒2": tokens for this whole turn. ▲ is blue or red when the turn's first
@@ -285,6 +284,8 @@ class ClaudeSession
     @window_size   = dig_i(window, 'context_window_size')
     @output_tokens = dig_i(window, 'total_output_tokens')
     @ctx           = dig_i(window, 'total_input_tokens') + @output_tokens
+    # the payload zeroes context_window around a cache miss; the tokens the next send re-caches are the real size
+    @ctx           = dig_i(data, 'prompt_cache', 'recache_tokens_if_cold') if @ctx.zero?
     @cache_created = dig_i(window, 'current_usage', 'cache_creation_input_tokens')
     @cost          = dig_f(data, 'cost', 'total_cost_usd')
     @model_name    = data.dig('model', 'display_name')
@@ -424,14 +425,14 @@ def cache_str(session)
 end
 
 # Width picks the pieces: 82+ draws bars, 174+ adds ▲▼⚒ $cost and model.
-# The ctx number shows on small and large, not on medium (bars stand in for it).
+# The ctx number always shows.
 def render(data)
   columns = ENV['COLUMNS'].to_i
   bars    = columns >= 82
   extras  = columns >= 174
   session = ClaudeSession.new(data)
 
-  left  = [git_str(session), [context_str(session, bars, !bars || extras), cache_str(session)].compact.join(' ')]
+  left  = [git_str(session), [context_str(session, bars), cache_str(session)].compact.join(' ')]
   right = []
   right += [turn_str(session), cost_str(session)] if extras
   right << rate_limit_str(session, bars)
