@@ -104,54 +104,20 @@ class StatuslineTest < Minitest::Test
     assert_equal :fried, ctx_tier_for(5_000_000, 'Claude Opus 5.5', 0)
   end
 
-  # --- model_level: Sonnet (80k / 200k / 400k) ---
-  def test_sonnet_good
-    assert_equal 0, model_level(50_000, 'Claude Sonnet 5')
-  end
+# --- ctx_model: zones and bar slots per model ---
+def test_ctx_model_zones_and_slots
+  assert_equal [80_000, 200_000, 400_000],  ctx_model('Claude Sonnet 5')[:zones]
+  assert_equal 10,                          ctx_model('Claude Sonnet 5')[:slots]
+  assert_equal [150_000, 350_000, 600_000], ctx_model('Claude Opus 5.5')[:zones]
+  assert_equal 12,                          ctx_model('Claude Opus 5.5')[:slots]
+  assert_equal [24_000, 45_000, 85_000],    ctx_model('qwen2.5-coder')[:zones]
+  assert_equal 5,                           ctx_model('qwen2.5-coder')[:slots]
+end
 
-  def test_sonnet_multi_hop
-    assert_equal 1, model_level(100_000, 'Claude Sonnet 5')
-  end
-
-  def test_sonnet_degraded_zone
-    assert_equal 2, model_level(250_000, 'Claude Sonnet 5')
-  end
-
-  def test_sonnet_fried
-    assert_equal 3, model_level(450_000, 'Claude Sonnet 5')
-  end
-
-  # --- model_level: Opus (150k / 350k / 600k) ---
-  def test_opus_good
-    assert_equal 0, model_level(100_000, 'Claude Opus 5.5')
-  end
-
-  def test_opus_multi_hop
-    assert_equal 1, model_level(200_000, 'Claude Opus 5.5')
-  end
-
-  def test_opus_degraded_zone
-    assert_equal 2, model_level(400_000, 'Claude Opus 5.5')
-  end
-
-  def test_opus_fried
-    assert_equal 3, model_level(650_000, 'Claude Opus 5.5')
-  end
-
-  # --- model_level: Qwen Coder (24k / 45k / 85k) ---
-  def test_qwen_good
-    assert_equal 0, model_level(10_000, 'qwen2.5-coder')
-  end
-
-  def test_qwen_fried
-    assert_equal 3, model_level(90_000, 'qwen2.5-coder')
-  end
-
-  # --- model_level: unrecognized model falls back to the conservative default ---
-  def test_unknown_model_uses_fallback_thresholds
-    assert_equal 0, model_level(10_000, 'gpt-4')
-    assert_equal 3, model_level(160_000, 'gpt-4')
-  end
+def test_ctx_model_unrecognized_or_missing_model_uses_the_fallback
+  assert_equal CTX_FALLBACK, ctx_model('gpt-4')
+  assert_equal CTX_FALLBACK, ctx_model(nil)
+end
 
   # --- THEME: a fried context is plain red, only :compact is bold ---
   def test_theme_colors_for_the_context_tiers

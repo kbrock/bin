@@ -35,7 +35,7 @@ require 'date'
 #                       ⚑ yellow stash, ↑ cyan unpushed or no upstream, ↓ cyan
 #                       behind, ✔ green in sync (ahead/behind as of the last fetch).
 #   ▣ ▰▰▱▱ 120.0k      context size. Green/blue/yellow/red = model-degradation
-#                       zones (model_zones); bold red = 85% of the context window.
+#                       zones (CTX_MODELS); bold red = 85% of the context window.
 #                       The bar (wide) is scaled to
 #                       the model's degraded size: Sonnet 10 slots of 40k, Opus 12
 #                       of 50k, plus RED_SLOTS past degraded. Each slot has its band's
@@ -135,35 +135,23 @@ def color_limits(v, str, yellow, red, low = '')
   paint(v >= red ? RED : v >= yellow ? YELLOW : low, str)
 end
 
-MODEL_COLORS = [GREEN, BLUE, YELLOW, RED].freeze
-
 CTX_TIER_NAMES = %i[good multi_hop degraded fried].freeze
 
 # Autocompact hits ~5% free. Trip :compact at 15% free: ten points of headroom
 # to act (save notes, flag surprises) before the wipe.
 CTX_COMPACT_PERCENT = 85
 
-# Reasoning-quality zone by model. Sonnet 5.5 vs Opus 5.5
-def model_zones(model_name)
-  case model_name.to_s.downcase
-  when /opus/i
-    [150_000, 350_000, 600_000]
-  when /sonnet/i
-    [80_000, 200_000, 400_000]
-  when /qwen.*coder/i
-    [24_000, 45_000, 85_000]
-  else
-    [32_000, 80_000, 150_000] # Fallback
-  end
-end
+# Reasoning-quality zones (where good ends, multi-hop ends, degraded ends) and bar
+# slots per model. Sonnet 5.5 vs Opus 5.5; the last entry is the fallback.
+CTX_MODELS = {
+  /opus/i        => { zones: [150_000, 350_000, 600_000], slots: 12 },
+  /sonnet/i      => { zones: [80_000, 200_000, 400_000],  slots: 10 },
+  /qwen.*coder/i => { zones: [24_000, 45_000, 85_000],    slots: 5 }
+}.freeze
+CTX_FALLBACK = { zones: [32_000, 80_000, 150_000], slots: 5 }.freeze
 
-def model_level(ctx, model_name)
-  good_max, multi_hop, degraded = model_zones(model_name)
-
-  return 3 if ctx >= degraded
-  return 2 if ctx >= multi_hop
-  return 1 if ctx >= good_max
-  0
+def ctx_model(model_name)
+  CTX_MODELS.find { |name, _| name =~ model_name.to_s }&.last || CTX_FALLBACK
 end
 
 # [used %, resets_at]; a window with no activity yet (5h first thing in the morning) is 0%
@@ -276,23 +264,15 @@ end
 # Slot width = degraded size / count, so every zone edge lands on a slot edge:
 # Sonnet 10 x 40k, Opus 12 x 50k.
 RED_SLOTS = 2 # extra slots past degraded, same width
-def ctx_slot_count(model_name)
-  case model_name.to_s.downcase
-  when /opus/i   then 12
-  when /sonnet/i then 10
-  else 5
-  end
-end
-
 # Every slot has the color of its band (the zone at the slot's start): solid
 # when ctx has reached it, hollow when it is still ahead.
 def ctx_slots(session)
-  count = ctx_slot_count(session.model_name)
+  count = ctx_model(session.model_name)[:slots]
   width = session.ctx_zones[2].to_f / count
   count += RED_SLOTS # the red zone starts at degraded, so it needs slots of its own
   lit   = [(session.ctx / width).floor, count].min
   (1..count).map do |k|
-    band = MODEL_COLORS[model_level(((k - 1) * width).to_i, session.model_name)]
+    band = THEME[calc_tier(((k - 1) * width).to_i, session.ctx_zone_tiers)]
     k <= lit ? paint(band, FILL) : paint(band, HOLLOW)
   end.join
 end
@@ -393,7 +373,12 @@ class ClaudeSession
   # Reasoning-quality zones for this model; level 0-3 for the current ctx; and
   # whether ctx is near the physical window limit
   def ctx_zones
-    @ctx_zones ||= model_zones(model_name)
+    @ctx_zones ||= ctx_model(model_name)[:zones]
+  end
+
+  # { 0 => :good, 150_000 => :multi_hop, 350_000 => :degraded, 600_000 => :fried }
+  def ctx_zone_tiers
+    @ctx_zone_tiers ||= ([0] + ctx_zones).zip(CTX_TIER_NAMES).to_h
   end
 
   # Named tiers for ctx: the model's zones, then :compact once ctx fills
@@ -401,7 +386,7 @@ class ClaudeSession
   # { 0 => :good, 150_000 => :multi_hop, ..., 850_000.0 => :compact }
   def ctx_tiers
     @ctx_tiers ||= begin
-      tiers = ([0] + model_zones(model_name)).zip(CTX_TIER_NAMES).to_h
+      tiers = ctx_zone_tiers
       if window_size > 0
         compact_at = window_size * CTX_COMPACT_PERCENT / 100.0
         tiers = tiers.reject { |from, _| from >= compact_at }
