@@ -21,7 +21,7 @@ class StatuslineTest < Minitest::Test
 
   # 7d pace coloring depends on the day, so rate-limit tests pin the clock.
   # Monday 11am with a 5d22h reset: the window started Sunday 9am, so one
-  # weekday half-day has passed (10% allowance) and 5% is on pace (uncolored).
+  # weekday has passed (20% allowance) and 5% is on pace (uncolored).
   def on_pace_monday
     now = Time.local(2026, 9, 28, 11)
     Time.stub(:now, now) { yield now.to_i }
@@ -661,6 +661,23 @@ class StatuslineTest < Minitest::Test
       session = ClaudeSession.new('rate_limits' => { 'five_hour' => { 'used_percentage' => 10, 'resets_at' => now + 9_000 } })
       assert_in_delta 50, session.five_expected, 0.01
     end
+  end
+
+  # 7d pace: 20% per weekday since the window opened, today counted whole.
+  def seven_expected_at(now, window_start)
+    Time.stub(:now, now) do
+      ClaudeSession.new('rate_limits' => { 'seven_day' => { 'used_percentage' => 0, 'resets_at' => (window_start + 7 * 86_400).to_i } }).seven_expected
+    end
+  end
+
+  def test_seven_expected_counts_weekdays_with_today_whole
+    assert_equal 20, seven_expected_at(Time.local(2026, 9, 28, 11), Time.local(2026, 9, 27, 9)) # sun start, mon now
+    assert_equal 100, seven_expected_at(Time.local(2026, 10, 2, 11), Time.local(2026, 9, 27, 9)) # fri
+  end
+
+  def test_seven_expected_weekend_adds_nothing
+    assert_equal 100, seven_expected_at(Time.local(2026, 10, 3, 11), Time.local(2026, 9, 27, 9)) # sat
+    assert_equal 100, seven_expected_at(Time.local(2026, 10, 4, 11), Time.local(2026, 9, 27, 9)) # sun
   end
 
   # --- ClaudeSession turn: from the transcript when readable, else the last request ---

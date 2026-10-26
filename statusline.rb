@@ -58,14 +58,11 @@ require 'date'
 #                       including the block you're in is bright green (used solid,
 #                       catch-up room hollow); the rest of the window is dim.
 #                       5h pace is linear across the window (1 slot per hour).
-#                       7d pace splits 100% over the half-days (10am-3pm, 3pm-8pm)
-#                       of the days in CLAUDE_PACE_DAYS (default mon-fri, 10% each)
-#                       reached so far.
+#                       7d pace is 20% per weekday (mon-fri) since the window opened,
+#                       today counted whole.
 #                       Either hitting 100% collapses both to
 #                       "API <clock>": you're on pay-as-you-go until then (7d
 #                       wins if both are maxed).
-#   CLAUDE_PACE_DAYS    days the 7d pace counts: "mon-fri" (default), "sat,sun",
-#                       "all". Ranges and commas mix ("mon-wed,fri").
 #   Glyphs              STATUSLINE_GLYPH picks one pair for every bar (context and
 #                       limits): parallelogram (default), braille, circles,
 #                       squares, pills, shades.
@@ -175,43 +172,6 @@ def limit_window(data, key)
   [w['used_percentage'] || 0, w['resets_at']]
 end
 
-# Work day is 10am-8pm, split into two half-days. Rough on purpose.
-HALF_DAY_STARTS = [10, 15].freeze
-HALF_DAY_SECS   = 5 * 3_600
-
-DAY_NAMES = %w[sun mon tue wed thu fri sat].freeze
-
-# Days this account is used, as wday numbers. CLAUDE_PACE_DAYS="mon-fri" (work,
-# the default), "sat,sun" (personal) or "all" (every day); ranges and commas mix.
-def pace_days
-  spec = (ENV['CLAUDE_PACE_DAYS'] || 'mon-fri').downcase
-  return (0..6).to_a if spec == 'all'
-  spec.split(',').flat_map do |part|
-    from, to = part.split('-').map { |d| DAY_NAMES.index(d[0, 3]) }
-    next [from] unless to
-    from <= to ? (from..to).to_a : (from..6).to_a + (0..to).to_a
-  end.compact.uniq
-end
-
-# 7d pace: the week's 100% split evenly over the half-days of pace_days; each
-# one reached so far this window counts (10% each for mon-fri). The half-day the
-# window started in counts whole. Other days add nothing.
-def seven_day_allowance(resets_at)
-  return 100 unless resets_at
-  days = pace_days
-  return 100 if days.empty?
-  now   = Time.now
-  start = Time.at(resets_at - 7 * 86_400)
-  halves = (start.to_date..now.to_date).sum do |d|
-    next 0 unless days.include?(d.wday)
-    HALF_DAY_STARTS.count do |h|
-      slot = Time.local(d.year, d.month, d.day, h)
-      slot + HALF_DAY_SECS > start && slot <= now
-    end
-  end
-  [halves * 100.0 / (days.size * HALF_DAY_STARTS.size), 100].min
-end
-
 # Limit tiers. :wall comes from the % used; the others from how far past the
 # pace you are, in points (negative = behind). Lower bounds, see calc_tier.
 LIMIT_WALL = { 90 => :wall }.freeze
@@ -226,9 +186,11 @@ def five_hour_pace(resets_at)
   (1 - (resets_at - Time.now.to_i) / 18_000.0).clamp(0, 1) * 100
 end
 
-# pace is the allowance for the days this account works (see seven_day_allowance)
+# pace is 20% per weekday (mon-fri) since the window opened, today counted whole
 def seven_day_pace(resets_at)
-  resets_at && seven_day_allowance(resets_at)
+  return nil unless resets_at
+  weekdays = (Time.at(resets_at - 7 * 86_400).to_date..Time.now.to_date).count { |d| (1..5).cover?(d.wday) }
+  [weekdays * 20.0, 100].min
 end
 
 # 5 slots, 20% each; any use shows at least one, full only at 100%.
