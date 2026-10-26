@@ -387,7 +387,6 @@ THEME = {
   cache_hit: BLUE, cache_miss: RED,
   behind: GREEN, on_pace: GREEN, ahead: PURPLE, wall: RED,
   warm: GREEN, cooling: TURQUOISE, expired: RED,
-  detached: RED, dirty: YELLOW, stash: YELLOW, unpushed: CYAN, behind_upstream: CYAN, synced: GREEN,
   high: YELLOW, xhigh: RED, max: RED,
   cost: MUTED, model: MUTED, api: RED
 }.freeze
@@ -403,88 +402,10 @@ def model_str(session)
   "#{name} #{paint(THEME[level.to_sym], EFFORT_ARROWS.fetch(level, level[0]))}"
 end
 
-# Same walk as the PS1 in dotfiles/bashrc.d/git-prompt.sh: find .git by walking
-# up, read HEAD directly (no fork). A .git file means a linked worktree.
-# => [root_dir, branch, linked_worktree?] or nil outside git
-def git_head(start)
-  dir = start.to_s
-  until dir.empty? || dir == '/'
-    git = File.join(dir, '.git')
-    linked = File.file?(git)
-    if linked
-      gitdir = File.read(git)[/gitdir: (.+)/, 1]
-      head = File.join(File.expand_path(gitdir, dir), 'HEAD') if gitdir
-    elsif File.directory?(git)
-      head = File.join(git, 'HEAD')
-    end
-    if head && File.file?(head)
-      ref = File.read(head)
-      return [dir, ref[%r{\Aref: refs/heads/(.+)}, 1]&.strip || '(detached)', linked]
-    end
-    dir = File.dirname(dir)
-  end
-  nil
-end
-
-# One symbol, the first that applies, shown left of the repo name:
-# The first that applies: :detached, :dirty (any local change, staged or not),
-# :stash, :unpushed (or no upstream), :behind_upstream, :synced. nil if git fails.
-# Ahead/behind are as of the last fetch: no network.
-def git_status(root)
-  out = IO.popen(['git', '-C', root, 'status', '--porcelain=v2', '--branch', '--show-stash', err: File::NULL], &:readlines)
-  return nil unless $?.success?
-
-  head     = out.find { |l| l.start_with?('# branch.head ') }.to_s.split.last
-  upstream = out.any? { |l| l.start_with?('# branch.upstream ') }
-  ahead, behind = out.find { |l| l.start_with?('# branch.ab ') }.to_s.scan(/\d+/).map(&:to_i)
-  stash    = out.find { |l| l.start_with?('# stash ') }.to_s.split.last.to_i
-  dirty    = out.any? { |l| !l.start_with?('#') }
-
-  if    head == '(detached)'        then :detached
-  elsif dirty                       then :dirty
-  elsif stash > 0                   then :stash
-  elsif !upstream || ahead.to_i > 0 then :unpushed
-  elsif behind.to_i > 0             then :behind_upstream
-  else :synced
-  end
-end
-
-# One symbol, shown left of the repo name
-GIT_STATE_GLYPHS = {
-  detached: '✖', dirty: '✚', stash: '⚑', unpushed: '↑', behind_upstream: '↓', synced: '✔'
-}.freeze
-
-BRANCH_MAX = 24
-
-# "#22", linked to the PR (OSC 8) when the url is known
-def pr_str(session)
-  number = session.pr_number
-  return nil unless number
-  text = "##{number}"
-  url  = session.pr_url
-  url ? "\e]8;;#{url}\e\\#{text}\e]8;;\e\\" : text
-end
-
-# "repo branch #pr"; nil outside git. The branch is dropped on main and in a
-# linked worktree (the worktree folder already names it). State symbols come
-# first, the repo name is bold blue as in the PS1, the branch is cyan.
-#
-# wide: "✔ [branch] repo #pr", branch always shown (PS1 style).
-def git_str(session, wide = false)
-  root, branch, linked = session.git_root, session.git_branch, session.git_linked?
-  return nil unless root
-  tier  = session.git_state
-  state = GIT_STATE_GLYPHS[tier] && paint(THEME[tier], GIT_STATE_GLYPHS[tier])
-  name = paint(BOLD_BLUE, File.basename(root))
-  text = branch.length > BRANCH_MAX ? "#{branch[0, BRANCH_MAX - 1]}…" : branch
-  if wide
-    parts = [state, "[#{paint(TURQUOISE, text)}]", name]
-  else
-    parts = [state, name]
-    parts << paint(TURQUOISE, text) unless linked || %w[main master].include?(branch)
-  end
-  parts << pr_str(session)
-  parts.compact.join(' ')
+# "[branch] dir"; nil outside git or on a detached HEAD
+def git_str(session)
+  branch = IO.popen(['git', '-C', session.cwd, 'branch', '--show-current', err: File::NULL], &:read).to_s.strip
+  "[#{TURQUOISE}#{branch}#{RESET}] #{BOLD_BLUE}#{File.basename(session.cwd)}#{RESET}" unless branch.empty?
 end
 
 # Everything a display needs, read from the JSON Claude Code sends. Every value is
@@ -613,14 +534,6 @@ class ClaudeSession
     seconds && calc_tier(seconds, CACHE_TIERS)
   end
 
-  def pr_number
-    @data.dig('pr', 'number')
-  end
-
-  def pr_url
-    @data.dig('pr', 'url')
-  end
-
   # {up:, down:, warm:, tools:} or nil; reads the transcript
   def turn
     defined?(@turn) ? @turn : (@turn = turn_usage(@data))
@@ -646,23 +559,6 @@ class ClaudeSession
     warm.nil? ? nil : (warm ? :cache_hit : :cache_miss)
   end
 
-  # nil outside git; these read .git/HEAD
-  def git_root
-    repo&.at(0)
-  end
-
-  def git_branch
-    repo&.at(1)
-  end
-
-  def git_linked?
-    repo&.at(2)
-  end
-
-  def git_state
-    @git_state ||= git_status(git_root) # forks `git status`
-  end
-
   private
 
   def limit_tier(pct, expected)
@@ -671,10 +567,6 @@ class ClaudeSession
 
   def cache
     @cache ||= prompt_cache(@data)
-  end
-
-  def repo
-    defined?(@repo) ? @repo : (@repo = git_head(cwd))
   end
 
   def context_window
@@ -727,7 +619,7 @@ def layout(data, wide, size, extras)
   model     = "⬢ #{model_str(session)}"
   rates     = rate_limit_str(session, wide)
 
-  [[git_str(session, wide), ctx_clock].compact.join('  '), [[usage, rates].compact.join('  '), (model if extras)].compact.join('  ')]
+  [[git_str(session), ctx_clock].compact.join('  '), [[usage, rates].compact.join('  '), (model if extras)].compact.join('  ')]
 end
 
 # Tried in order: [bars, ctx size, ▲▼⚒ $cost model]
