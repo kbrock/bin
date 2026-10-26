@@ -2,78 +2,21 @@
 require 'json'
 require 'date'
 
-# Bar charts available (reference). Samples at ~60%.
-#
-# Binary: every cell is full or empty.
-#   circles       ●●●○○      big circles   ⬤⬤⬤◯◯      pills         ▮▮▮▯▯
-#   parallelogram ▰▰▰▱▱      squares       ■■■□□      rects         ◼◼◼▭▭
-#   arrows        ►►►▷▷      bars          ≡≡≡−−      shades        ▓▓▓░░
-#   solid+shade   ███░░      braille       ⣿⣿⣿⣀⣀      low line      ███▁▁
-#   emoji (2 wide, fixed color)  ⬛⬛⬛⬜⬜  ⚫⚫⚫⚪⚪
-#
-# Graded: one cell can be partly full, so N cells give more than N steps.
-#   eighth blocks ███▍ (▏▎▍▌▋▊▉█, 8 steps/cell)    braille dots (8 per cell, 4 tall)
-#   partial glyph ⬤⬤⬤◔○  ■■■◱□                     levels ▃▅▆█▇ (a sparkline, not a fill)
-#
-# Background track: fill in the foreground color over a gray background
-# (\e[48;5;238m) so the empty part shows where 100% ends. Works with any glyph,
-# best with eighth blocks and braille.
-#
-# Seen in the wild: solid colored fill, dithered dark track, percent in the
-# fill's color; green, then yellow, then red as it fills.
+# Statusline: one line, left group and right group pushed to the edge by COLUMNS.
+#   git_str         [branch] dir
+#   context_str     ▣ bar size      zone color per model; bold red at 85% of the window
+#   cache_str       ⛁ clock         green warm, turquoise under 2m, red EXPIRED
+#   turn_str        ▲up ▼down ⚒n    tokens this turn, from the transcript
+#   cost_str        $cost           API cost
+#   rate_limit_str  ◷ 3h ▰▱▱▱▱     5h and 7d limits; the label is the reset countdown
+#   model_str       ⬢ Opus ⇑       effort arrow
 
-# Statusline — where am I, what is this costing, and when does the cache go cold?
-#
-# One line: a left group and a right group, the right one pushed to the edge
-# using COLUMNS (minus RIGHT_MARGIN, which keeps clear of notifications).
-# Wide layout when it fits; then narrow; then narrow without $cost and model
-# (no context bar, limits as %, branch hidden on main/master and in worktrees).
-#
-#   ✔ [main] repo #22   one state symbol, [branch], repo (bold blue), PR number
-#                       (links to the PR). Branch is turquoise. The symbol is the
-#                       first that applies: ✖ red detached, ✚ yellow local changes,
-#                       ⚑ yellow stash, ↑ cyan unpushed or no upstream, ↓ cyan
-#                       behind, ✔ green in sync (ahead/behind as of the last fetch).
-#   ▣ ▰▰▱▱ 120.0k      context size. Green/blue/yellow/red = model-degradation
-#                       zones (CTX_MODELS); bold red = 85% of the context window.
-#                       The bar (wide) is scaled to
-#                       the model's degraded size: Sonnet 10 slots of 40k, Opus 12
-#                       of 50k, plus RED_SLOTS past degraded. Each slot has its band's
-#                       color: solid once reached, hollow while ahead. The size takes
-#                       the color of the highest band reached.
-#   ⛁ 10:06pm          prompt-cache expiry: green = warm, red EXPIRED (next send
-#                       misses). Absent when Claude Code reports no expiry.
-#   ▲up ▼down ⚒count   tokens for this whole turn: your prompt plus every tool
-#                       round-trip (summed from the transcript). ▲ = new input
-#                       (uncached + cache writes), ▼ = output. Falls back to the
-#                       last API request when the transcript can't be read.
-#                       ▲ blue/red = the turn's first send hit/missed the cache
-#                       (tool round-trips are seconds apart, so they're always warm).
-#                       ⚒ = tool calls this turn. Off when SHOW_TURN is false.
-#   $cost               session API cost (not real billing on subscription)
-#   ◷ 3h ▰▱▱▱▱         5h and 7d subscription limits; the label IS the reset
-#                       countdown. Bar (wide) = 5 slots of 20%, or the % (narrow).
-#                       Used slots are solid: green, purple 10+ ahead of pace, red
-#                       at LIMIT_WALL (90%) or more. Behind pace, everything up to and
-#                       including the block you're in is bright green (used solid,
-#                       catch-up room hollow); the rest of the window is dim.
-#                       5h pace is linear across the window (1 slot per hour).
-#                       7d pace is 20% per weekday (mon-fri) since the window opened,
-#                       today counted whole.
-#                       Either hitting 100% collapses both to
-#                       "API <clock>": you're on pay-as-you-go until then (7d
-#                       wins if both are maxed).
-#   Glyphs              STATUSLINE_GLYPH picks one pair for every bar (context and
-#                       limits): parallelogram (default), braille, circles,
-#                       squares, pills, shades.
-#   ⬢ Opus ⇑           model name and effort: ↓ low, no arrow for medium,
-#                       ↑ yellow high, ⇑ red xhigh, ⇈ red max.
-
-# One glyph pair for every bar (context and limits): [filled, hollow].
-# STATUSLINE_GLYPH picks the set; see the samples at the top.
+# One glyph pair for every bar (context and limits): [filled, empty]. STATUSLINE_GLYPH picks one.
+# Ideas, not built (a cell can be partly full, so they need a different bar): eighth blocks
+# ▏▎▍▌▋▊▉█, braille dots ⣀⣄⣤⣦⣶⣷⣿, a low line ▁▂▃▄▅▆▇█, a gray background behind the empty part.
 GLYPHS = {
-  'parallelogram' => %w[▰ ▱], 'circles' => %w[● ○], 'squares' => %w[■ □],
-  'pills' => %w[▮ ▯], 'braille' => %w[⣿ ⣀], 'shades' => %w[▓ ░]
+  'parallelogram' => %w[▰ ▱], 'arrows' => %w[► ▷], 'squares' => %w[■ □], 'rects' => %w[◼ ▭],
+  'circles' => %w[● ○], 'pills' => %w[▮ ▯], 'shades' => %w[▓ ░]
 }.freeze
 FILL, HOLLOW = GLYPHS.fetch(ENV['STATUSLINE_GLYPH'].to_s, GLYPHS['parallelogram'])
 
@@ -121,18 +64,16 @@ FMT_CLOCK = ->(ts, with_date) {
 BLUE, YELLOW, RED, BOLD_RED, PURPLE, GREEN, RESET =
   "\e[34m", "\e[33m", "\e[31m", "\e[1;31m", "\e[38;5;135m", "\e[32m", "\e[0m"
 
-def paint(color, str)
-  color.to_s.empty? ? str : "#{color}#{str}#{RESET}"
+# name is a THEME entry; nil or unknown is plain text
+def paint(name, str)
+  color = THEME[name]
+  color ? "#{color}#{str}#{RESET}" : str
 end
 
 # The name of the tier a value falls in. tiers maps each tier's lower bound to
 # its name: { 0 => :good, 80_000 => :multi_hop }. nil when below the first bound.
 def calc_tier(value, tiers)
   tiers.select { |from, _| from <= value }.max_by { |from, _| from }&.last
-end
-
-def color_limits(v, str, yellow, red, low = '')
-  paint(v >= red ? RED : v >= yellow ? YELLOW : low, str)
 end
 
 CTX_TIER_NAMES = %i[good multi_hop degraded fried].freeze
@@ -165,19 +106,6 @@ end
 LIMIT_WALL = { 90 => :wall }.freeze
 LIMIT_PACE = { -Float::INFINITY => :behind, 0 => :on_pace, 10 => :ahead }.freeze
 
-# pace is linear: the share of the window already elapsed
-def five_hour_pace(resets_at)
-  return nil unless resets_at
-  (1 - (resets_at - Time.now.to_i) / 18_000.0).clamp(0, 1) * 100
-end
-
-# pace is 20% per weekday (mon-fri) since the window opened, today counted whole
-def seven_day_pace(resets_at)
-  return nil unless resets_at
-  weekdays = (Time.at(resets_at - 7 * 86_400).to_date..Time.now.to_date).count { |d| (1..5).cover?(d.wday) }
-  [weekdays * 20.0, 100].min
-end
-
 # 5 slots, 20% each; any use shows at least one, full only at 100%.
 # Behind pace, the window up to and including the block you're in is bright:
 # the used slots (solid) and the catch-up room (hollow). The rest is dim.
@@ -193,11 +121,10 @@ end
 
 # time left, then % used as a bar (wide) or a number (narrow), in the pace color
 def limit_bar(pct, resets, fallback, pace, tier, wide)
-  color = THEME[tier]
   label = FMT_LEFT[resets]
   label = fallback if label.empty?
   # narrow: the % is right-aligned in 3 so "3h  5%" and "3d 42%" use one space for 2 digits
-  return "◷ #{label} #{paint(color, format('%3s', "#{pct.round}%"))}" unless wide
+  return "◷ #{label} #{paint(tier, format('%3s', "#{pct.round}%"))}" unless wide
   "◷ #{label.ljust(3)} #{limit_slots(pct, pace, tier)}"
 end
 
@@ -210,7 +137,7 @@ def rate_limit_str(session, wide = false)
     # in the meantime, you're still gated by 7d, so that's the only reset
     # worth knowing about. Percentage is dropped — it's just 100%, not info.
     clock = session.seven_pct >= 100 ? FMT_CLOCK[session.seven_resets, true] : FMT_CLOCK[session.five_resets, false]
-    return paint(THEME[:api], "API #{clock}")
+    return paint(:api, "API #{clock}")
   end
 
   "#{limit_bar(session.five_pct, session.five_resets, '5h', session.five_expected, session.five_tier, wide)}  #{limit_bar(session.seven_pct, session.seven_resets, '7d', session.seven_expected, session.seven_tier, wide)}"
@@ -257,7 +184,7 @@ end
 # Sonnet 10 x 40k, Opus 12 x 50k.
 # One slot per entry: solid in on[k] if k < filled, else hollow in off[k] (theme names)
 def bar(filled, on, off)
-  on.each_index.map { |k| k < filled ? paint(THEME[on[k]], FILL) : paint(THEME[off[k]], HOLLOW) }.join
+  on.each_index.map { |k| k < filled ? paint(on[k], FILL) : paint(off[k], HOLLOW) }.join
 end
 
 RED_SLOTS = 2 # extra slots past degraded, same width
@@ -271,30 +198,27 @@ def ctx_slots(session)
   bar([(session.ctx / width).floor, count].min, bands, bands)
 end
 
-SHOW_TURN = true
-
-# "▣ ▰▰▱▱ 120.3k": the ▣ takes the size's color (so the 85% alert shows without
-# the number). wide adds the bar, size adds the number.
+# "▣ ▰▰▱▱ 120k": the ▣ takes the size's color (so the 85% alert shows without
+# the number). wide adds the bar, size adds the number. The bar is scaled to the
+# model's degraded size (Sonnet 10 slots of 40k, Opus 12 of 50k) plus RED_SLOTS past
+# it; each slot has its zone's color, solid once reached.
 def context_str(session, wide = false, size = true)
-  color = THEME[session.ctx_tier]
-  str   = paint(color, '▣')
+  str   = paint(session.ctx_tier, '▣')
   str  += " #{ctx_slots(session)}" if wide
-  str  += paint(color, FMT_COUNT[session.ctx].rjust(7)) if size
+  str  += paint(session.ctx_tier, FMT_COUNT[session.ctx].rjust(7)) if size
   str
 end
 
-# "▲200 ▼300 ⚒2": tokens for this whole turn. nil when SHOW_TURN is false.
-# Per-turn ▲▼⚒ took a while to tune: DO NOT DELETE. Set SHOW_TURN to false to
-# hide it (it also skips reading the transcript).
+# "▲200 ▼300 ⚒2": tokens for this whole turn. ▲ is blue or red when the turn's first
+# send hit or missed the cache.
 def turn_str(session)
-  return nil unless SHOW_TURN
-  up_str   = paint(THEME[session.turn_cache_tier], "▲#{FMT_COUNT[session.turn_up]}")
-  down_str = paint(PURPLE, "▼#{FMT_COUNT[session.turn_down]}")
+  up_str   = paint(session.turn_cache_tier, "▲#{FMT_COUNT[session.turn_up]}")
+  down_str = paint(:turn_down, "▼#{FMT_COUNT[session.turn_down]}")
   "#{up_str} #{down_str} ⚒#{session.turn_tools}"
 end
 
 def cost_str(session)
-  paint(THEME[:cost], format('$%.2f', session.cost))
+  paint(:cost, format('$%.2f', session.cost))
 end
 
 # [warm, expires_at]; nil when there is no cache
@@ -326,7 +250,8 @@ THEME = {
   behind: BRIGHT_GREEN, future: DIM_GREEN, on_pace: GREEN, ahead: PURPLE, wall: RED,
   warm: GREEN, cooling: TURQUOISE, expired: RED,
   high: YELLOW, xhigh: RED, max: RED,
-  cost: MUTED, model: MUTED, api: RED
+  cost: MUTED, model: MUTED, api: RED, turn_down: PURPLE,
+  repo: BOLD_BLUE, branch: TURQUOISE
 }.freeze
 
 EFFORT_ARROWS = { 'low' => '↓', 'medium' => '→', 'high' => '↑', 'xhigh' => '⇑', 'max' => '⇈' }.freeze
@@ -334,40 +259,48 @@ EFFORT_ARROWS = { 'low' => '↓', 'medium' => '→', 'high' => '↑', 'xhigh' =>
 # "Opus ⇑": model name without the version, then an arrow for effort
 # (colored when xhigh/max). Medium and models without effort get no arrow.
 def model_str(session)
-  name  = paint(THEME[:model], session.model_name.to_s[/\A[A-Za-z]+/].to_s)
+  name  = paint(:model, session.model_name.to_s[/\A[A-Za-z]+/].to_s)
   level = session.effort
   return name if level.nil? || level == 'medium'
-  "#{name} #{paint(THEME[level.to_sym], EFFORT_ARROWS.fetch(level, level[0]))}"
+  "#{name} #{paint(level.to_sym, EFFORT_ARROWS.fetch(level, level[0]))}"
 end
 
 # "[branch] dir"; nil outside git or on a detached HEAD
 def git_str(session)
   branch = IO.popen(['git', '-C', session.cwd, 'branch', '--show-current', err: File::NULL], &:read).to_s.strip
-  "[#{TURQUOISE}#{branch}#{RESET}] #{BOLD_BLUE}#{File.basename(session.cwd)}#{RESET}" unless branch.empty?
+  "[#{paint(:branch, branch)}] #{paint(:repo, File.basename(session.cwd))}" unless branch.empty?
 end
 
-# Everything a display needs, read from the JSON Claude Code sends. Every value is
-# a method, memoized, so what the line doesn't show is never computed: the
-# transcript is only read by #turn, `git status` only by #git_state.
+# Everything a display needs, read from the JSON Claude Code sends. Plain values
+# are set once in the constructor; derived values are methods, memoized, so what
+# the line doesn't show is never computed (the transcript is only read by #turn).
 # Limits are percents (0-100), and so are the *_expected pace values.
 class ClaudeSession
+  attr_accessor :ctx, :output_tokens, :cache_created, :window_size, :cost, :model_name, :effort, :cwd,
+                :five_pct, :five_resets, :seven_pct, :seven_resets, :cache_warm, :cache_expires_at
+
   def initialize(data)
     @data = data
+    window = data['context_window'] || {}
+    @window_size   = dig_i(window, 'context_window_size')
+    @output_tokens = dig_i(window, 'total_output_tokens')
+    @ctx           = dig_i(window, 'total_input_tokens') + @output_tokens
+    @cache_created = dig_i(window, 'current_usage', 'cache_creation_input_tokens')
+    @cost          = dig_f(data, 'cost', 'total_cost_usd')
+    @model_name    = data.dig('model', 'display_name')
+    @effort        = data.dig('effort', 'level')
+    @cwd           = data.dig('workspace', 'current_dir') || data['cwd'] || Dir.pwd
+    @five_pct, @five_resets   = limit_window(data, 'five_hour')
+    @seven_pct, @seven_resets = limit_window(data, 'seven_day')
+    @cache_warm, @cache_expires_at = prompt_cache(data) # nil when Claude Code reports no cache expiry
   end
 
-  def ctx
-    @ctx ||= dig_i(context_window, 'total_input_tokens') + dig_i(context_window, 'total_output_tokens')
+  # nil when there are no subscription limits (API key)
+  def limits?
+    !@data['rate_limits'].nil?
   end
 
-  def output_tokens
-    @output_tokens ||= dig_i(context_window, 'total_output_tokens')
-  end
-
-  def cache_created
-    @cache_created ||= dig_i(context_window, 'current_usage', 'cache_creation_input_tokens')
-  end
-  # Reasoning-quality zones for this model; level 0-3 for the current ctx; and
-  # whether ctx is near the physical window limit
+  # Reasoning-quality zones for this model
   def ctx_zones
     @ctx_zones ||= ctx_model(model_name)[:zones]
   end
@@ -400,49 +333,16 @@ class ClaudeSession
     window_size > 0 ? ctx * 100.0 / window_size : 0
   end
 
-  def window_size
-    @window_size ||= dig_i(context_window, 'context_window_size')
-  end
-
-  def cost
-    @cost ||= dig_f(@data, 'cost', 'total_cost_usd')
-  end
-
-  def model_name
-    @model_name ||= @data.dig('model', 'display_name')
-  end
-
-  def effort
-    @effort ||= @data.dig('effort', 'level')
-  end
-
-  def cwd
-    @cwd ||= @data.dig('workspace', 'current_dir') || @data['cwd'] || Dir.pwd
-  end
-
-  # nil when there are no subscription limits (API key)
-  def limits?
-    !@data['rate_limits'].nil?
-  end
-
-  def five_pct
-    five_hour.first
-  end
-
-  def five_resets
-    five_hour.last
-  end
-
-  def seven_pct
-    seven_day.first
-  end
-
-  def seven_resets
-    seven_day.last
-  end
-
   def five_expected
-    @five_expected ||= five_hour_pace(five_resets)
+    return unless five_resets
+    hours = (Time.now - Time.at(five_resets - 5 * 3600)) / 3600
+    (hours * 20).clamp(0, 100) # 20% per hour
+  end
+
+  def seven_expected
+    return unless seven_resets
+    days = Time.at(seven_resets - 7 * 86_400).to_date..Time.now.to_date
+    [days.count { |d| d.wday.between?(1, 5) } * 20, 100].min # 20% per weekday
   end
 
   # :wall, :ahead, :on_pace or :behind; no pace known counts as :on_pace
@@ -452,19 +352,6 @@ class ClaudeSession
 
   def seven_tier
     limit_tier(seven_pct, seven_expected)
-  end
-
-  def seven_expected
-    @seven_expected ||= seven_day_pace(seven_resets)
-  end
-
-  # nil when Claude Code reports no cache expiry
-  def cache_warm
-    cache&.first
-  end
-
-  def cache_expires_at
-    cache&.last
   end
 
   def cache_seconds_left
@@ -507,22 +394,6 @@ class ClaudeSession
   def limit_tier(pct, expected)
     calc_tier(pct, LIMIT_WALL) || (expected ? calc_tier(pct - expected, LIMIT_PACE) : :on_pace)
   end
-
-  def cache
-    @cache ||= prompt_cache(@data)
-  end
-
-  def context_window
-    @context_window ||= @data['context_window'] || {}
-  end
-
-  def five_hour
-    @five_hour ||= limit_window(@data, 'five_hour')
-  end
-
-  def seven_day
-    @seven_day ||= limit_window(@data, 'seven_day')
-  end
 end
 
 # Claude Code sets COLUMNS for us; notifications share the right edge, so keep a margin
@@ -549,35 +420,25 @@ def cache_str(session)
   tier = session.cache_tier
   return nil unless tier
   text = tier == :expired ? 'EXPIRED' : FMT_CLOCK[session.cache_expires_at, false]
-  "⛁ #{paint(THEME[tier], text)}"
+  "⛁ #{paint(tier, text)}"
 end
 
-# => [left, right]
-# wide:      ✔ [branch] repo #pr  ▣ ▰▱▱▱▱ ctx ⛁ clock          $cost  ◷ 5h ▰▱▱▱▱  ◷ 7d ▰▱▱▱▱  ⬢ model
-# condensed: ✔ repo branch #pr  ▣ ctx ⛁ clock                   $cost  ◷ 5h ⣿⡏⠀⠀  ◷ 7d ⠇⠀⠀⠀  ⬢ model
-def layout(data, wide, size, extras)
-  session = ClaudeSession.new(data)
-  ctx_clock = [context_str(session, wide, size), cache_str(session)].compact.join(' ')
-  usage     = extras ? [turn_str(session), cost_str(session)].compact.join('  ') : nil
-  model     = "⬢ #{model_str(session)}"
-  rates     = rate_limit_str(session, wide)
-
-  [[git_str(session), ctx_clock].compact.join('  '), [[usage, rates].compact.join('  '), (model if extras)].compact.join('  ')]
-end
-
-# Tried in order: [bars, ctx size, ▲▼⚒ $cost model]
-#   large:  bars + size + ▲▼⚒ $cost model
-#   medium: bars only
-#   small:  no bar, size only (nothing else)
-# The first layout whose minimum COLUMNS is met wins; the width is the only rule.
-# last flag: push the right group to the edge (medium keeps it next to the left group)
-LAYOUTS = [[true, true, true, 174, true], [true, false, false, 82, false], [false, true, false, 0, true]].freeze
-
+# Width picks the pieces: 82+ draws bars, 174+ adds ▲▼⚒ $cost and model.
+# The ctx number shows on small and large, not on medium (bars stand in for it).
 def render(data)
   columns = ENV['COLUMNS'].to_i
-  wide, size, extras, _, edge = LAYOUTS.find { |_, _, _, min_columns, _| columns >= min_columns }
-  left, right = layout(data, wide, size, extras)
-  edge ? justify(left, right) : "#{left}  #{right}"
+  bars    = columns >= 82
+  extras  = columns >= 174
+  session = ClaudeSession.new(data)
+
+  left  = [git_str(session), [context_str(session, bars, !bars || extras), cache_str(session)].compact.join(' ')]
+  right = []
+  right += [turn_str(session), cost_str(session)] if extras
+  right << rate_limit_str(session, bars)
+  right << "⬢ #{model_str(session)}" if extras
+
+  left, right = [left, right].map { |parts| parts.compact.join('  ') }
+  bars && !extras ? "#{left}  #{right}" : justify(left, right) # medium keeps the groups together
 end
 
 if __FILE__ == $0

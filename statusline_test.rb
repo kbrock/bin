@@ -56,10 +56,10 @@ class StatuslineTest < Minitest::Test
   end
 
   # --- paint: no color means plain text ---
-  def test_paint_nil_color_is_plain
+  def test_paint_nil_or_unknown_name_is_plain
     assert_equal 'x', paint(nil, 'x')
-    assert_equal 'x', paint('', 'x')
-    assert_equal "#{RED}x#{RESET}", paint(RED, 'x')
+    assert_equal 'x', paint(:no_such_name, 'x')
+    assert_equal "#{RED}x#{RESET}", paint(:fried, 'x')
   end
 
   # --- ctx_tier: the model's zones by name, :compact past 85% of the window ---
