@@ -119,12 +119,19 @@ def limit_slots(pct, pace, tier)
   bar(filled, [used] * 5, [:behind] * due + [:future] * (5 - due))
 end
 
-# time left, then % used as a bar (wide) or a number (narrow), in the pace color
+# One braille cell, 20% per step: ⣀ is the baseline, each step adds a dot.
+LIMIT_DOTS = %w[⣀ ⣠ ⣤ ⣴ ⣶].freeze
+
+# The narrow bar: one cell whose height is the % used, in the tier color.
+def limit_dots(pct, tier)
+  paint(tier, LIMIT_DOTS[[(pct / 20).floor, LIMIT_DOTS.size - 1].min])
+end
+
+# time left, then % used as a bar (wide) or one braille cell (narrow), in the pace color
 def limit_bar(pct, resets, fallback, pace, tier, wide)
   label = FMT_LEFT[resets]
   label = fallback if label.empty?
-  # narrow: the % is right-aligned in 3 so "3h  5%" and "3d 42%" use one space for 2 digits
-  return "◷ #{label} #{paint(tier, format('%3s', "#{pct.round}%"))}" unless wide
+  return "◷ #{label} #{limit_dots(pct, tier)}" unless wide
   "◷ #{label.ljust(3)} #{limit_slots(pct, pace, tier)}"
 end
 
