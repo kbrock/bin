@@ -293,6 +293,7 @@ class ClaudeSession
     @ctx           = dig_i(window, 'total_input_tokens') + @output_tokens
     # the payload zeroes context_window around a cache miss; the tokens the next send re-caches are the real size
     @ctx           = dig_i(data, 'prompt_cache', 'recache_tokens_if_cold') if @ctx.zero?
+    @ctx           = last_request_size if @ctx.zero? # stale session: the payload has nothing, the transcript does
     @cache_created = dig_i(window, 'current_usage', 'cache_creation_input_tokens')
     @cost          = dig_f(data, 'cost', 'total_cost_usd')
     @model_name    = data.dig('model', 'display_name')
@@ -301,6 +302,20 @@ class ClaudeSession
     @five_pct, @five_resets   = limit_window(data, 'five_hour')
     @seven_pct, @seven_resets = limit_window(data, 'seven_day')
     @cache_warm, @cache_expires_at = prompt_cache(data) # nil when Claude Code reports no cache expiry
+  end
+
+  # last entries of the transcript, parsed; [] when unreadable
+  def transcript_tail(bytes = 65_536)
+    path = @data['transcript_path']
+    return [] unless path && File.file?(path)
+    File.open(path) { |f| f.seek([f.size - bytes, 0].max); f.read.lines }.filter_map { |l| JSON.parse(l) rescue nil }
+  end
+
+  # input + cache tokens of the last main-chain request in the transcript; 0 when unknown
+  def last_request_size
+    u = transcript_tail(TRANSCRIPT_TAIL).reverse_each.find { |j| j['type'] == 'assistant' && !j['isSidechain'] && j.dig('message', 'usage') }
+    u = u&.dig('message', 'usage') || {}
+    %w[input_tokens cache_read_input_tokens cache_creation_input_tokens output_tokens].sum { |k| dig_i(u, k) }
   end
 
   # nil when there are no subscription limits (API key)
@@ -451,8 +466,10 @@ end
 
 if __FILE__ == $0
   input = $stdin.read
-  # dev only: STATUSLINE_DUMP=/path/file.json saves what Claude Code sends (owner-readable)
-  #File.write(ENV['STATUSLINE_DUMP'], input, perm: 0o600) if ENV['STATUSLINE_DUMP']
   data = JSON.parse(input) rescue {}
+  # dev only, off: when the payload carries no ctx, keep it for inspection (one file per session, owner-readable)
+  # if data.dig('context_window', 'total_input_tokens').to_i.zero? && data.dig('prompt_cache', 'recache_tokens_if_cold').to_i.zero?
+  #   File.write("/tmp/statusline-#{data['session_id']}.json", input, perm: 0o600)
+  # end
   puts render(data)
 end
