@@ -271,10 +271,14 @@ def model_str(session)
   "#{name} #{paint(level.to_sym, EFFORT_ARROWS.fetch(level, level[0]))}"
 end
 
-# "[branch] dir"; nil outside git or on a detached HEAD
+# Where the work is happening, not where the session started: the transcript stamps every
+# entry with the live cwd, and git says the branch there. Last 30 chars of the branch; the dir name on a trunk branch.
+TRUNKS = %w[master main development].freeze
 def git_str(session)
-  branch = IO.popen(['git', '-C', session.cwd, 'branch', '--show-current', err: File::NULL], &:read).to_s.strip
-  "[#{paint(:branch, branch)}] #{paint(:repo, File.basename(session.cwd))}" unless branch.empty?
+  cwd    = session.transcript_tail.reverse_each.find { |j| j["cwd"] }&.fetch("cwd") || session.cwd
+  branch = IO.popen(['git', '-C', cwd, 'branch', '--show-current', err: File::NULL], &:read).to_s.strip
+  return if branch.empty?
+  TRUNKS.include?(branch) ? paint(:repo, File.basename(cwd)) : paint(:branch, branch[-30..] || branch)
 end
 
 # Everything a display needs, read from the JSON Claude Code sends. Plain values
