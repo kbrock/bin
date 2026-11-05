@@ -20,6 +20,14 @@ GLYPHS = {
 }.freeze
 FILL, HOLLOW = GLYPHS.fetch(ENV['STATUSLINE_GLYPH'].to_s, GLYPHS['parallelogram'])
 
+# The field icons. STATUSLINE_ICONS=nerd uses Nerd Font icons (Ghostty has them built in),
+# which most fonts draw better than these unicode ones (Menlo or STIX stand in for them).
+ICONS = {
+  'unicode' => { ctx: '▣', cache: '⛁', clock: '◷', tools: '⚒', model: '⬢' },
+  'nerd'    => { ctx: "\u{f2db}", cache: "\u{f1c0}", clock: "\u{f017}", tools: "\u{f0ad}", model: "\u{f1b2}" }
+}.freeze
+ICON = ICONS.fetch(ENV['STATUSLINE_ICONS'].to_s, ICONS['unicode'])
+
 def dig_i(h, *path)
   (h.dig(*path) || 0).to_i
 end
@@ -106,6 +114,7 @@ end
 LIMIT_WALL = { 90 => :wall }.freeze
 LIMIT_PACE = { -Float::INFINITY => :behind, 0 => :on_pace, 10 => :ahead }.freeze
 
+
 # 5 slots, 20% each; any use shows at least one, full only at 100%.
 # Behind pace, the window up to and including the block you're in is bright:
 # the used slots (solid) and the catch-up room (hollow). The rest is dim.
@@ -131,8 +140,8 @@ end
 def limit_bar(pct, resets, fallback, pace, tier, wide)
   label = FMT_LEFT[resets]
   label = fallback if label.empty?
-  return "◷ #{label} #{limit_dots(pct, tier)}" unless wide
-  "◷ #{label.ljust(3)} #{limit_slots(pct, pace, tier)}"
+  return "#{ICON[:clock]} #{label} #{limit_dots(pct, tier)}" unless wide
+  "#{ICON[:clock]} #{label.ljust(3)} #{limit_slots(pct, pace, tier)}"
 end
 
 def rate_limit_str(session, wide = false)
@@ -210,7 +219,7 @@ end
 # model's degraded size (Sonnet 10 slots of 40k, Opus 12 of 50k) plus RED_SLOTS past
 # it; each slot has its zone's color, solid once reached.
 def context_str(session, wide = false)
-  str   = paint(session.ctx_tier, '▣')
+  str   = paint(session.ctx_tier, ICON[:ctx])
   str  += " #{ctx_slots(session)}" if wide
   str + paint(session.ctx_tier, FMT_COUNT[session.ctx].rjust(5))
 end
@@ -220,7 +229,7 @@ end
 def turn_str(session)
   up_str   = paint(session.turn_cache_tier, "▲#{FMT_COUNT[session.turn_up]}")
   down_str = paint(:turn_down, "▼#{FMT_COUNT[session.turn_down]}")
-  "#{up_str} #{down_str} ⚒#{session.turn_tools}"
+  "#{up_str} #{down_str} #{ICON[:tools]}#{session.turn_tools}"
 end
 
 def cost_str(session)
@@ -447,7 +456,7 @@ def cache_str(session)
   tier = session.cache_tier
   return nil unless tier
   text = tier == :expired ? 'EXPIRED' : FMT_CLOCK[session.cache_expires_at, false]
-  "⛁ #{paint(tier, text)}"
+  "#{ICON[:cache]} #{paint(tier, text)}"
 end
 
 # Width picks the pieces: 82+ draws bars, 174+ adds ▲▼⚒ $cost and model.
@@ -462,7 +471,7 @@ def render(data)
   right = []
   right += [turn_str(session), cost_str(session)] if extras
   right << rate_limit_str(session, bars)
-  right << "⬢ #{model_str(session)}" if extras
+  right << "#{ICON[:model]} #{model_str(session)}" if extras
 
   left, right = [left, right].map { |parts| parts.compact.join('  ') }
   bars && !extras ? "#{left}  #{right}" : justify(left, right) # medium keeps the groups together
