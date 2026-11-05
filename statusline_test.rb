@@ -646,6 +646,11 @@ end
     assert_equal 100, seven_expected_at(Time.local(2026, 10, 4, 11), Time.local(2026, 9, 27, 9)) # sun
   end
 
+  def test_seven_expected_past_midnight_is_still_the_day_before
+    # 1am Tuesday is still Monday's workday
+    assert_equal 20, seven_expected_at(Time.local(2026, 9, 29, 1), Time.local(2026, 9, 27, 9))
+  end
+
   # --- ClaudeSession turn: from the transcript when readable, else the last request ---
   def turn_session(*requests, cache: nil)
     file = Tempfile.new(['transcript', '.jsonl'])

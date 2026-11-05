@@ -114,6 +114,9 @@ end
 LIMIT_WALL = { 90 => :wall }.freeze
 LIMIT_PACE = { -Float::INFINITY => :behind, 0 => :on_pace, 10 => :ahead }.freeze
 
+# A workday starts at 6am, so a session past midnight still counts as the day before
+# (ClaudeSession#seven_expected).
+DAY_START_HOUR = 6
 
 # 5 slots, 20% each; any use shows at least one, full only at 100%.
 # Behind pace, the window up to and including the block you're in is bright:
@@ -375,10 +378,12 @@ class ClaudeSession
     (hours * 20).clamp(0, 100) # 20% per hour
   end
 
+  # 20% per workday since the 7d window opened, today counted whole. A workday
+  # runs DAY_START_HOUR to DAY_START_HOUR, so work past midnight is still "today".
   def seven_expected
     return unless seven_resets
-    days = Time.at(seven_resets - 7 * 86_400).to_date..Time.now.to_date
-    [days.count { |d| d.wday.between?(1, 5) } * 20, 100].min # 20% per weekday
+    days = workday(Time.at(seven_resets - 7 * 86_400))..workday(Time.now)
+    [days.count { |d| d.wday.between?(1, 5) } * 20, 100].min
   end
 
   # :wall, :ahead, :on_pace or :behind; no pace known counts as :on_pace
@@ -426,6 +431,10 @@ class ClaudeSession
   end
 
   private
+
+  def workday(time)
+    (time - DAY_START_HOUR * 3600).to_date
+  end
 
   def limit_tier(pct, expected)
     calc_tier(pct, LIMIT_WALL) || (expected ? calc_tier(pct - expected, LIMIT_PACE) : :on_pace)
