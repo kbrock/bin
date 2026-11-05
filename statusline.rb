@@ -477,6 +477,32 @@ def render(data)
   bars && !extras ? "#{left}  #{right}" : justify(left, right) # medium keeps the groups together
 end
 
+# temporary: sample the limits to measure how many 7d points a full 5h window costs.
+# Every session logs, and an idle one keeps reporting its last (stale) numbers,
+# so only a sample newer than the last line is kept: a later window, or a higher %.
+# Remove once that ratio is known.
+LIMITS_LOG = File.expand_path('~/.cache/statusline-limits.log')
+
+def limits_sample(line)
+  line.scan(/(\w+)=(\S*)/).to_h.slice('five', 'five_resets', 'seven', 'seven_resets').transform_values(&:to_f)
+end
+
+def newer_sample?(cur, last)
+  return true if last.empty?
+  %w[five_resets seven_resets].each { |k| return cur[k] > last[k] if cur[k] != last[k] }
+  cur['five'] > last['five'] || cur['seven'] > last['seven']
+end
+
+def log_limits(data)
+  five, five_resets   = limit_window(data, 'five_hour')
+  seven, seven_resets = limit_window(data, 'seven_day')
+  return unless five_resets && seven_resets # no limits, or a window not yet started
+  line = "five=#{five} five_resets=#{five_resets} seven=#{seven} seven_resets=#{seven_resets}"
+  last = File.file?(LIMITS_LOG) ? File.open(LIMITS_LOG) { |f| f.seek([f.size - 512, 0].max); f.read.lines.last.to_s } : ''
+  return unless newer_sample?(limits_sample(line), limits_sample(last))
+  File.write(LIMITS_LOG, "#{Time.now.strftime('%FT%T')} #{line} model=#{data.dig('model', 'id')}\n", mode: 'a')
+end
+
 if __FILE__ == $0
   input = $stdin.read
   data = JSON.parse(input) rescue {}
@@ -484,5 +510,6 @@ if __FILE__ == $0
   # if data.dig('context_window', 'total_input_tokens').to_i.zero? && data.dig('prompt_cache', 'recache_tokens_if_cold').to_i.zero?
   #   File.write("/tmp/statusline-#{data['session_id']}.json", input, perm: 0o600)
   # end
+  log_limits(data) rescue nil
   puts render(data)
 end
