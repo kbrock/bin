@@ -1,1 +1,3 @@
-dscacheutil -flushcache
+# call with sudo
+dscacheutil -flushcache; killall -HUP mDNSResponder
+
