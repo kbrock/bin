@@ -116,6 +116,7 @@ LIMIT_PACE = { -Float::INFINITY => :behind, 0 => :on_pace, 10 => :ahead }.freeze
 
 # A workday starts at 6am, so a session past midnight still counts as the day before
 # (ClaudeSession#seven_expected).
+# About 6 full 5h windows fill the week (measured 0.16-0.18 7d points per 5h point).
 DAY_START_HOUR = 6
 
 # 5 slots, 20% each; any use shows at least one, full only at 100%.
@@ -486,10 +487,10 @@ def render(data)
   bars && !extras ? "#{left}  #{right}" : justify(left, right) # medium keeps the groups together
 end
 
-# temporary: sample the limits to measure how many 7d points a full 5h window costs.
+# Samples the limits to measure how many 7d points a full 5h window costs.
+# Off unless STATUSLINE_LOG_LIMITS=1 (set it in the statusLine command in settings.json).
 # Every session logs, and an idle one keeps reporting its last (stale) numbers,
 # so only a sample newer than the last line is kept: a later window, or a higher %.
-# Remove once that ratio is known.
 LIMITS_LOG = File.expand_path('~/.cache/statusline-limits.log')
 
 def limits_sample(line)
@@ -519,6 +520,6 @@ if __FILE__ == $0
   # if data.dig('context_window', 'total_input_tokens').to_i.zero? && data.dig('prompt_cache', 'recache_tokens_if_cold').to_i.zero?
   #   File.write("/tmp/statusline-#{data['session_id']}.json", input, perm: 0o600)
   # end
-  log_limits(data) rescue nil
+  log_limits(data) rescue nil if ENV['STATUSLINE_LOG_LIMITS'] == '1'
   puts render(data)
 end
