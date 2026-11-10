@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+
+# This script allows you to specify an app that always opens a particular extension
+
+function ext_to_content_type() {
+  local lsregister=/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister
+  local extension=${1:?Please pass extension}
+  $lsregister -dump | awk '/^uti:/ {print $2}' | grep $extension | sort -u
+}
+
+EXTENSION=${1:?file extension please}
+APP=${2:?application please}
+
+EDITOR_BUNDLE=$(osascript -e 'id of app "'$APP'"')
+CONTENT_TYPE=$(ext_to_content_type ${EXTENSION})
+echo duti -s "$EDITOR_BUNDLE" "$CONTENT_TYPE" all
