@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# usage: rex-connect [-f] HOST
+set -u
+
+force=0
+[ "${1:-}" = "-f" ] && { force=1; shift; }
+host=${1:?usage: rex-connect [-f] HOST}
+
+[ "$host" = "$(hostname -s)" ] && { echo "$host is this machine"; exit 0; }
+
+sock=/tmp/rex-$host.sock
+
+if [ -e "$sock" ] && ! rex -S "unix://$sock" server status >/dev/null 2>&1; then
+  if [ $force = 1 ]; then
+    pkill -f "ssh -fN .*-L $sock:"
+    rm -f "$sock"
+  else
+    echo "$sock exists but is not answering. Run with -f to clear it and reconnect." >&2
+    exit 1
+  fi
+fi
+
+if [ ! -e "$sock" ]; then
+  ep=$(ssh "$host" rex server status | sed -n 's|^endpoint: unix://||p')
+  [ -n "$ep" ] || { echo "no rex server on $host" >&2; exit 1; }
+  remote=$(printf '%b' "${ep//%/\\x}")
+  ssh -fN -o ExitOnForwardFailure=yes -L "$sock:$remote" "$host" || exit 1
+fi
+
+rex hosts | grep -q "$host" || rex hosts add "$host" "unix://$sock"
+echo "Rex app > Add Remote Host: $sock"
