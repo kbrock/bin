@@ -27,21 +27,39 @@ done
 [[ ${#NAMES[@]} -gt 0 || ${#VENDORS[@]} -gt 0 ]] || usage
 [[ ${#NAMES[@]} -gt 0 ]] || NAMES=("")
 
+# Print the plain aws command (no --query/--output plumbing) so it can be copied and run by hand.
+show() { echo "  \$ aws $*"; }
+
+show bedrock list-foundation-models --by-output-modality TEXT
 ACTIVE=$(aws bedrock list-foundation-models --by-output-modality TEXT \
   --query "modelSummaries[?modelLifecycle.status=='ACTIVE'].modelId" --output text | tr '\t' '\n' \
   | grep -E "^($(IFS='|'; echo "${PROVIDERS[*]}"))\." || true)
 
 for NAME in "${NAMES[@]}"; do
   echo "== ${NAME:-${PROVIDERS[*]}}"
-  MATCHES=$(grep -F -- "$NAME" <<<"$ACTIVE" || true)
+  MATCHES=$(grep -E -- "$NAME" <<<"$ACTIVE" || true)
   if [[ $(grep -c . <<<"$MATCHES") -ne 1 ]]; then
     sed 's/^/  /' <<<"${MATCHES:-no ACTIVE model matches}"
     continue
   fi
-  STATUS=$(aws bedrock get-foundation-model-availability --model-id "$MATCHES" --query 'agreementAvailability.status' --output text)
+  show bedrock get-foundation-model-availability --model-id "$MATCHES"
+  # one call; tab-separated status and (possibly empty) error message
+  IFS=$'\t' read -r STATUS ERRMSG < <(aws bedrock get-foundation-model-availability --model-id "$MATCHES" \
+    --query 'agreementAvailability.[status, errorMessage || '"''"']' --output text)
   echo "  $MATCHES: $STATUS"
+  if [[ "$STATUS" == "ERROR" ]]; then
+    case "$ERRMSG" in
+      INVALID_PAYMENT_INSTRUMENT*)
+        echo "  No valid payment method on this AWS account (the one that owns the profile; the management account if in an Organization)."
+        echo "  Fix: Billing console > Payment preferences > add/update a default card, then re-run with --accept." ;;
+      *) echo "  $ERRMSG" ;;
+    esac
+    continue
+  fi
   if [[ "$ACCEPT" == true && "$STATUS" != "AVAILABLE" ]]; then
+    show bedrock list-foundation-model-agreement-offers --model-id "$MATCHES"
     TOKEN=$(aws bedrock list-foundation-model-agreement-offers --model-id "$MATCHES" --query 'offers[0].offerToken' --output text)
+    show bedrock create-foundation-model-agreement --model-id "$MATCHES" --offer-token '$TOKEN'
     aws bedrock create-foundation-model-agreement --model-id "$MATCHES" --offer-token "$TOKEN" >/dev/null
     echo "  accepted (access can take ~5 minutes)"
   fi
